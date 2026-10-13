@@ -1,0 +1,7 @@
+e04f269f1a76eb6ed4e8cd33e2ccfeda6fd391a3  ruvnet/RuView tag v0.8.8-esp32 (firmware 0.8.8)
+
+Why 0.8.8: it is the newest RuView firmware with a recorded physical
+qualification on an ESP32-S3 in raw-CSI mode (edge tier 0), which is exactly
+how MediSense uses the board: 300 s, ~28 frames/s, zero transport errors,
+zero resets (docs/validation/2026-08-31-esp32-s3-rate-aware-transport.md in
+the RuView repo). Later prereleases (0.8.13, 0.8.14) have only CI/host tests.

@@ -1,0 +1,113 @@
+name: Firmware (ESP32-S3)
+
+# Builds RuView's CSI firmware for plain ESP32-S3 boards (display support and
+# the 40 Hz LED compiled out) and publishes the result to the `firmware-build`
+# branch. MediSense then copies the verified files into firmware/esp32s3-*/,
+# from where the app flashes them. Docker isn't available on macOS 11, which
+# is why the build runs here.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/build/**"
+      - ".github/workflows/firmware.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [s3-8mb, s3-4mb]
+    steps:
+      - name: Check out MediSense
+        uses: actions/checkout@v4
+        with:
+          path: medisense
+
+      - name: Read the pinned RuView commit
+        id: ref
+        shell: bash
+        run: |
+          sha="$(grep -oE '^[0-9a-f]{40}' medisense/firmware/build/RUVIEW_REF | head -1)"
+          echo "RuView commit: $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out RuView firmware sources (pinned commit)
+        uses: actions/checkout@v4
+        with:
+          repository: ruvnet/RuView
+          ref: ${{ steps.ref.outputs.sha }}
+          path: ruview
+          sparse-checkout: firmware/esp32-csi-node
+          persist-credentials: false
+
+      - name: Build
+        shell: bash
+        run: bash medisense/firmware/build/build.sh "${{ matrix.variant }}" ruview "out/${{ matrix.variant }}"
+
+      - name: Keep the result (and the log, even when the build fails)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.variant }}
+          path: out/${{ matrix.variant }}
+          if-no-files-found: warn
+
+  publish:
+    name: Publish to the firmware-build branch
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect build outputs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: artifacts
+
+      - name: Commit binaries and logs to firmware-build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          PUB="$RUNNER_TEMP/publish"
+          mkdir -p "$PUB/firmware"
+          shopt -s nullglob
+          for d in artifacts/fw-*; do
+            v="${d##*/fw-}"
+            mkdir -p "$PUB/firmware/esp32$v"
+            cp -r "$d"/. "$PUB/firmware/esp32$v/"
+          done
+          {
+            echo "# Firmware build"
+            echo
+            echo "- result: $BUILD_RESULT"
+            echo "- MediSense commit: $GITHUB_SHA"
+            echo "- run: $RUN_URL"
+            echo "- finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$PUB/STATUS.md"
+          cd "$PUB"
+          git init -q
+          git checkout -q -b firmware-build
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Firmware build ($BUILD_RESULT) for $GITHUB_SHA"
+          git push --force -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:firmware-build
+          echo "published firmware-build ($BUILD_RESULT)"

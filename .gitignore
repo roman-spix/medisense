@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+/build/
+/dist/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Local data never belongs in git (recordings live in ~/MediSense)
+*.mscap
+*.mscap.gz
+*.sqlite
+*.sqlite3
+*.db
+.env

@@ -1,0 +1,16 @@
+# MediSense overlay for RuView's esp32-csi-node firmware. Applied last, on top
+# of RuView's sdkconfig.defaults and its devkitc (8 MB) or 4mb overlay.
+
+# Plain dev boards (ESP32-S3-DevKitC-1 and friends) have no AMOLED panel. With
+# display support compiled in, RuView's panel probe can false-positive on them,
+# which skips the MGMT+DATA CSI upgrade and drops CSI to 0 frames/s
+# (see RuView's sdkconfig.defaults.devkitc). Compile it out.
+# CONFIG_DISPLAY_ENABLE is not set
+
+# RuView drives the onboard RGB LED as a 40 Hz flickering light by default.
+# Nobody wants that next to them while meditating: keep the LED off.
+# CONFIG_LED_GAMMA_VIZ is not set
+
+# Hot-loadable WASM sensing modules (tier 3) are not used by MediSense. This
+# matches RuView's own S3 qualification build, where tier 3 was absent.
+# CONFIG_WASM_ENABLE is not set

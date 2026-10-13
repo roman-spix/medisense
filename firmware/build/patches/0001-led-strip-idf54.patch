@@ -1,0 +1,10 @@
+--- a/firmware/esp32-csi-node/main/idf_component.yml
++++ b/firmware/esp32-csi-node/main/idf_component.yml
+@@ -10,4 +10,6 @@
+   espressif/esp_lcd_touch: "^1.0"
+ 
+   ## Onboard WS2812 LED Disabling
+-  espressif/led_strip: "^3.0.0"
++  # MediSense: 3.1.0+ needs the IDF >= 5.5 API rmt_tx_switch_gpio; stay on 3.0.x for IDF 5.4
++  # (same fix RuView applied upstream after v0.8.8)
++  espressif/led_strip: "~3.0.3"

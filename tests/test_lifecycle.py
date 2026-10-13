@@ -61,9 +61,13 @@ def env(tmp_path, monkeypatch):
     return state
 
 
-async def settle():
-    for _ in range(20):
-        await asyncio.sleep(0.01)
+async def wait_for(cond, timeout=20.0):
+    """Building the settings image starts a separate Python, which takes a
+    second or two on slower Macs; wait for the outcome instead of guessing."""
+    deadline = time.monotonic() + timeout
+    while not cond():
+        assert time.monotonic() < deadline, "timed out"
+        await asyncio.sleep(0.05)
 
 
 def feed(mgr, *lines):
@@ -98,7 +102,7 @@ async def test_board_lifecycle(env):
         await mgr.setup("Home", "short")
 
     await mgr.setup("Home", "correct horse battery")
-    await settle()
+    await wait_for(lambda: mgr.state == "starting")
     assert len(env["flashes"]) == 1 and env["flashes"][0]["full"]
     assert env["passwords"] == {"Home": "correct horse battery"}
     saved = reg.get(CHIP.mac)
@@ -134,7 +138,7 @@ async def test_board_lifecycle(env):
     env["ip"] = "192.168.1.40"
     env["ports"] = [PORT]
     await mgr._poll()
-    await settle()
+    await wait_for(lambda: mgr.state == "starting")
     assert len(env["flashes"]) == 2 and env["flashes"][1]["full"] is False
     assert reg.get(CHIP.mac)["settings"]["target_ip"] == "192.168.1.40"
 
@@ -155,12 +159,12 @@ async def test_wrong_password_then_fixed(env):
     env["ports"] = [PORT]
     await mgr._poll()
     await mgr.setup("Home", "wrong password")
-    await settle()
+    await wait_for(lambda: mgr.state == "starting")
     feed(mgr, BOOT[0], BOOT[1], *["W (2600) main: WiFi disconnected, reason=15 rssi=-40"] * 4)
     assert mgr.state == "wifi_failed" and "password" in mgr.message
 
     await mgr.setup("Home", "right password")
-    await settle()
+    await wait_for(lambda: mgr.state == "starting")
     assert len(env["flashes"]) == 2 and env["flashes"][1]["full"] is False  # firmware already there
     feed(mgr, *BOOT)
     assert mgr.state == "starting"
@@ -173,11 +177,11 @@ async def test_wrong_router_filter_is_dropped(env, monkeypatch):
     env["ports"] = [PORT]
     await mgr._poll()
     await mgr.setup("Home", "correct horse battery")
-    await settle()
+    await wait_for(lambda: mgr.state == "starting")
     feed(mgr, *BOOT)  # joined WiFi, but no CSI callbacks and no data
     mgr._started_at -= 30
     mgr._check_health()
-    await settle()
+    await wait_for(lambda: len(env["flashes"]) == 2 and mgr.state == "starting")
     assert len(env["flashes"]) == 2
     assert reg.get(CHIP.mac)["settings"]["filter_mac"] is None
     assert mgr.filter_fallback_done

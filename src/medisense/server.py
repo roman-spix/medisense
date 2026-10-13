@@ -46,7 +46,7 @@ async def _json(request: web.Request) -> dict:
     try:
         data = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise ValueError("bad JSON")
+        raise ValueError("bad JSON") from None
     if not isinstance(data, dict):
         raise ValueError("expected an object")
     return data

@@ -128,10 +128,11 @@ class MediSenseApp:
             return
         if self.session:
             self.session.wave(wave)
-        t0 = self.session.t0_mono if self.session else self.started
+        # Times relative to app start (not the session) so the scrolling
+        # chart never jumps backwards when a session starts or ends.
         await self.broadcast({
             "type": "wave",
-            "samples": [[round(t - t0, 3), round(b, 4), round(m, 2)] for t, b, m in wave],
+            "samples": [[round(t - self.started, 3), None if b is None else round(b, 4), round(m, 2)] for t, b, m in wave],
         })
 
     async def _slow_loop(self) -> None:

@@ -98,7 +98,14 @@ export class LineChart {
     const pad = (ymax - ymin) * 0.12 || 1;
     if (this.opts.yMin == null) ymin -= pad;
     if (this.opts.yMax == null) ymax += pad;
-    if (this.opts.floor != null) ymin = Math.max(this.opts.floor, ymin);
+    // A minimum span keeps small wobbles from looking like big swings.
+    const ms = this.opts.minSpan;
+    if (ms && ymax - ymin < ms) {
+      const c = (ymax + ymin) / 2;
+      ymin = this.opts.yMin != null ? this.opts.yMin : c - ms / 2;
+      ymax = ymin + ms;
+    }
+    if (this.opts.floor != null && ymin < this.opts.floor) { ymax += this.opts.floor - ymin; ymin = this.opts.floor; }
     return { xmin, xmax, ymin, ymax };
   }
 
@@ -119,10 +126,12 @@ export class LineChart {
     ctx.fillStyle = css("--text-muted");
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
+    const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
+    const yFmt = o.yFormat || ((v) => v.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0));
     for (const t of ticks) {
       const y = Math.round(Y(t)) + 0.5;
       ctx.beginPath(); ctx.moveTo(o.padLeft, y); ctx.lineTo(w - o.padRight, y); ctx.stroke();
-      ctx.fillText(o.yFormat ? o.yFormat(t) : String(t), o.padLeft - 6, y);
+      ctx.fillText(yFmt(t), o.padLeft - 6, y);
     }
     // x ticks
     ctx.textAlign = "center";
@@ -246,8 +255,8 @@ export class WaveChart {
     const tEnd = this.data[this.data.length - 1][0];
     const X = (t) => w - (tEnd - t) / this.seconds * (w - 8) - 8;
     // robust autoscale
-    const vals = this.data.map((d) => Math.abs(d[1])).sort((a, b) => a - b);
-    const p95 = vals[Math.floor(vals.length * 0.95)] || 0.5;
+    const vals = this.data.filter((d) => d[1] != null).map((d) => Math.abs(d[1])).sort((a, b) => a - b);
+    const p95 = vals.length ? vals[Math.floor(vals.length * 0.95)] : 0.5;
     this.scale += ((p95 || 0.5) - this.scale) * 0.08;
     const Y = (v) => mid - (v / Math.max(this.scale, 0.05)) * (h * 0.38);
 
@@ -262,13 +271,23 @@ export class WaveChart {
     ctx.strokeStyle = css("--breath");
     ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
     ctx.beginPath();
-    this.data.forEach(([t, v], i) => (i ? ctx.lineTo(X(t), Y(v)) : ctx.moveTo(X(t), Y(v))));
+    let pen = false;
+    for (const [t, v] of this.data) {
+      if (v == null) { pen = false; continue; }
+      if (pen) ctx.lineTo(X(t), Y(v)); else { ctx.moveTo(X(t), Y(v)); pen = true; }
+    }
     ctx.stroke();
     const [lt, lv] = this.data[this.data.length - 1];
-    ctx.fillStyle = css("--surface"); ctx.beginPath(); ctx.arc(X(lt), Y(lv), 6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = css("--breath"); ctx.beginPath(); ctx.arc(X(lt), Y(lv), 4, 0, Math.PI * 2); ctx.fill();
+    if (lv != null) {
+      ctx.fillStyle = css("--surface"); ctx.beginPath(); ctx.arc(X(lt), Y(lv), 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css("--breath"); ctx.beginPath(); ctx.arc(X(lt), Y(lv), 4, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.fillStyle = css("--text-muted");
     ctx.font = "11px system-ui, -apple-system, sans-serif";
+    if (vals.length === 0) {
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("Learning your breathing… sit still", w / 2, mid - 14);
+    }
     ctx.textBaseline = "bottom";
     ctx.textAlign = "left"; ctx.fillText(`−${this.seconds} s`, 2, h - 2);
     ctx.textAlign = "right"; ctx.fillText("now", w - 2, h - 2);

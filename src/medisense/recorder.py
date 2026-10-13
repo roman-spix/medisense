@@ -97,13 +97,13 @@ class SessionRecorder:
         self._metrics.writerow({**row, "t": self.rel(t_mono)})
         self._maybe_flush()
 
-    def wave(self, samples: list[tuple[float, float, float]]) -> None:
+    def wave(self, samples: list[tuple[float, float | None, float]]) -> None:
         if self.closed:
             return
         for t, b, m in samples:
             self._wave_skip ^= 1
             if self._wave_skip:  # 20 Hz -> 10 Hz on disk
-                self._wave.writerow([self.rel(t), f"{b:.4f}", f"{m:.3f}"])
+                self._wave.writerow([self.rel(t), "" if b is None else f"{b:.4f}", f"{m:.3f}"])
 
     def posture(self, t_mono: float, p: dict) -> None:
         if self.closed:

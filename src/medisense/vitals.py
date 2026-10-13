@@ -134,7 +134,8 @@ class VitalsEngine:
         self._hp = dsp.butter_bandpass(*HEART_BAND, fs, order=2)
         self._wave_filter = dsp.StreamingSos(self._bp, LLTF_SUBCARRIERS)
         self._breath_w: np.ndarray | None = None
-        self._wave_scale = 1e-3
+        self._wave_ref: np.ndarray | None = None
+        self._wave_scale: float | None = None
 
         self._motion_smooth = 0.0
         self._motion_index = 0.0
@@ -143,7 +144,8 @@ class VitalsEngine:
         self._event: MotionEvent | None = None
         self._calm_since: float | None = None
         self.events_out: list[MotionEvent] = []
-        self.wave_out: list[tuple[float, float, float]] = []  # (t, breath wave, motion)
+        # (t, breath wave or None while it is still being learned, motion)
+        self.wave_out: list[tuple[float, float | None, float]] = []
 
         self._breath = _Tracker(5)
         self._heart = _Tracker(7)
@@ -227,6 +229,7 @@ class VitalsEngine:
         self._bin_sum[:] = 0
         self._bin_n = 0
         self._wave_filter.reset()
+        self._wave_ref = None
         self._breath.clear()
         self._heart.clear()
         self._breath_conf = self._heart_conf = 0.0
@@ -257,13 +260,14 @@ class VitalsEngine:
             self._update_motion_state(t)
         self._moving.append(self._motion_state == "moving")
 
-        # Live breathing waveform (causal)
-        y = self._wave_filter.step(x)
-        wave = 0.0
-        if self._breath_w is not None:
-            wave = float(y[self.mask] @ self._breath_w)
-            self._wave_scale += 0.01 * (abs(wave) - self._wave_scale)
-            wave = wave / max(self._wave_scale, 1e-6) * 0.5
+        # Live breathing waveform (causal). Filtering the change from the
+        # segment's first sample avoids a start-up jolt from the high-pass.
+        if self._wave_ref is None:
+            self._wave_ref = x.copy()
+        y = self._wave_filter.step(x - self._wave_ref)
+        wave = None
+        if self._breath_w is not None and self._wave_scale:
+            wave = float(y[self.mask] @ self._breath_w) / self._wave_scale * 0.5
         self.wave_out.append((t, wave, self._motion_index))
 
     def _motion_baseline(self) -> float:
@@ -308,7 +312,7 @@ class VitalsEngine:
 
     # ---------------------------------------------------------------- output
 
-    def drain_wave(self) -> list[tuple[float, float, float]]:
+    def drain_wave(self) -> list[tuple[float, float | None, float]]:
         out, self.wave_out = self.wave_out, []
         return out
 
@@ -383,6 +387,7 @@ class VitalsEngine:
         if mask.sum() >= 8 and not np.array_equal(mask, self.mask):
             self.mask = mask
             self._breath_w = None  # weights were for the old subcarrier set
+            self._wave_scale = None
 
     def _window(self, T: np.ndarray, t_now: float, length: float, settled_from: float) -> slice | None:
         start_t = max(t_now - length, settled_from, T[0])
@@ -403,6 +408,9 @@ class VitalsEngine:
         if self._breath_w is not None and len(self._breath_w) == len(w) and float(w @ self._breath_w) < 0:
             w, sig = -w, -sig
         self._breath_w = w
+        amp = float(np.std(sig)) * math.sqrt(2)  # ~ peak amplitude of the breath wave
+        if amp > 0:
+            self._wave_scale = amp if not self._wave_scale else 0.8 * self._wave_scale + 0.2 * amp
 
         prefer = self._breath.last / 60.0 if self._breath.last else None
         peak = dsp.spectral_peak(sig, self.fs, *BREATH_BAND, prefer=prefer, prefer_width=0.05)

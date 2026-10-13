@@ -95,6 +95,7 @@
         <header class="card-h"><h2 id="h-still">Stillness</h2></header>
         <div class="state-line"><span id="still-icon" class="state-icon" aria-hidden="true">○</span><span id="still-val" class="state-text">--</span></div>
         <canvas id="motion-spark" class="spark" aria-label="Movement, last 5 minutes"></canvas>
+        <p class="caption">Movement over the last 5 minutes. Above the faint line counts as restless.</p>
         <dl class="mini wide">
           <div><dt>Settled for</dt><dd id="settled">--</dd></div>
           <div><dt>Shifts this session</dt><dd id="shifts">0</dd></div>
@@ -122,6 +123,18 @@
         </div>
       </article>
 
+      <article class="card" aria-labelledby="h-signal">
+        <header class="card-h"><h2 id="h-signal">Signal</h2></header>
+        <div class="state-line"><span id="sig-icon" class="state-icon" aria-hidden="true">…</span><span id="sig-val" class="state-text">--</span></div>
+        <dl class="mini wide grid2">
+          <div><dt>Frames per second</dt><dd id="sig-fps">--</dd></div>
+          <div><dt>Lost</dt><dd id="sig-loss">--</dd></div>
+          <div><dt>Strength</dt><dd id="sig-rssi">--</dd></div>
+          <div><dt>WiFi channel</dt><dd id="sig-ch">--</dd></div>
+        </dl>
+        <p class="caption" id="sig-note">Waiting for data from the board.</p>
+      </article>
+
       <article class="card span3" aria-labelledby="h-trend">
         <header class="card-h"><h2 id="h-trend">Over time</h2><span class="hint" id="trend-hint">Last 10 minutes</span></header>
         <div class="multiples">
@@ -133,7 +146,6 @@
       </article>
     </div>
 
-    <footer class="signal" id="signal">Signal: --</footer>
   </section>
 
   <!-- ========================================================= HISTORY -->

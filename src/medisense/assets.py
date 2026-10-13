@@ -14,6 +14,7 @@ import io
 import logging
 import ssl
 import tarfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -49,19 +50,31 @@ def ready() -> bool:
     return all((d / f).exists() for f in MP_FILES) and (d / MODEL_NAME).exists()
 
 
-def _ssl_context() -> ssl.SSLContext:
+def _ssl_contexts() -> list[ssl.SSLContext]:
+    """certifi's certificates first (reliable on a standalone Python), then the system's."""
+    out = []
     try:
         import certifi
 
-        return ssl.create_default_context(cafile=certifi.where())
+        out.append(ssl.create_default_context(cafile=certifi.where()))
     except ImportError:
-        return ssl.create_default_context()
+        pass
+    out.append(ssl.create_default_context())
+    return out
 
 
 def _download(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "MediSense"})
-    with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:
-        return r.read()
+    last: Exception | None = None
+    for ctx in _ssl_contexts():
+        try:
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+                return r.read()
+        except urllib.error.URLError as e:
+            if not isinstance(getattr(e, "reason", None), ssl.SSLError):
+                raise
+            last = e
+    raise last if last else RuntimeError("download failed")
 
 
 def fetch_sync() -> None:

@@ -85,8 +85,11 @@ def summarize(path: Path) -> dict:
     s["breath_coverage_pct"] = round(100.0 * len(br_valid) / n, 1)
     s["breath_avg"] = _mean([b for _, b in br_valid])
     if br_valid:
-        first = [b for ti, b in br_valid if ti <= br_valid[0][0] + 180]
-        last = [b for ti, b in br_valid if ti >= br_valid[-1][0] - 180]
+        # First vs last 3 minutes; for short sessions, first vs last third.
+        span = br_valid[-1][0] - br_valid[0][0]
+        win = min(180.0, max(20.0, span / 3))
+        first = [b for ti, b in br_valid if ti <= br_valid[0][0] + win]
+        last = [b for ti, b in br_valid if ti >= br_valid[-1][0] - win]
         s["breath_start"] = _mean(first)
         s["breath_end"] = _mean(last)
         arr = np.array([b for _, b in br_valid])

@@ -54,6 +54,10 @@ WRONG_PASSWORD_REASONS = {15, 202, 204}
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+# A reset over the native USB port makes macOS drop and re-add the device for
+# a moment. Only treat the board as unplugged after it's been gone this long.
+UNPLUG_AFTER_S = 4.0
+
 
 @dataclass
 class UsbPort:
@@ -158,7 +162,7 @@ async def run_esptool(args: list[str], on_line: Callable[[str], None] | None = N
         rc = await asyncio.wait_for(proc.wait(), 10)
     except asyncio.TimeoutError:
         proc.kill()
-        raise EsptoolError("esptool took too long and was stopped. Unplug and replug the board, then try again.")
+        raise EsptoolError("esptool took too long and was stopped. Unplug and replug the board, then try again.") from None
     out = "\n".join(lines)
     if rc != 0:
         raise EsptoolError(explain_esptool_failure(out))
@@ -430,6 +434,8 @@ class DeviceManager:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ignored: set[str] = set()
         self._saved_pw = False
+        self._missing_since: float | None = None
+        self._fw_checked = (-1e9, None)
 
     async def _refresh_ssid(self) -> None:
         ssid = await asyncio.to_thread(network.current_ssid)
@@ -534,7 +540,13 @@ class DeviceManager:
         devices = {p.device for p in ports}
         self._ignored &= devices  # a replugged board gets a fresh try
         if self.port and self.port.device not in devices:
+            now = time.monotonic()
+            if self._missing_since is None:
+                self._missing_since = now
+            if now - self._missing_since < UNPLUG_AFTER_S:
+                return  # probably just re-enumerating after a reset
             await self._unplugged()
+        self._missing_since = None
         if not self.port:
             fresh = [p for p in ports if p.device not in self._ignored]
             if fresh:
@@ -658,10 +670,14 @@ class DeviceManager:
                 await self.reset_board()
             asyncio.create_task(later())
 
+    def _log_key(self) -> tuple:
+        b = self.log
+        return (b.wifi, b.board_ip, b.streaming, b.boots, sum(b.reason_counts.values()))
+
     def _on_log_line(self, line: str) -> None:
-        before = (self.log.wifi, self.log.board_ip, self.log.streaming)
+        before = self._log_key()
         self.log.feed(line)
-        if (self.log.wifi, self.log.board_ip, self.log.streaming) != before:
+        if self._log_key() != before:
             self._check_health()
 
     def _check_health(self) -> None:
@@ -690,7 +706,7 @@ class DeviceManager:
                     asyncio.create_task(self._drop_filter(s))
                     return
             if since > 20:
-                fw = network.firewall_blocks_incoming()
+                fw = self._firewall_blocks()
                 hint = (" The macOS firewall is blocking incoming connections: System Preferences → Security & Privacy → Firewall."
                         if fw else " Is the Mac on the same WiFi network as the board?")
                 self._set("connected", f"The board is on WiFi ({self.log.board_ip}) but no data reaches this Mac.{hint}")
@@ -699,6 +715,13 @@ class DeviceManager:
             return
         if self.state not in ("starting", "error"):
             self._set("starting", "Waiting for the board to join the WiFi…")
+
+    def _firewall_blocks(self) -> bool | None:
+        at, value = self._fw_checked
+        if time.monotonic() - at > 60:
+            value = network.firewall_blocks_incoming()
+            self._fw_checked = (time.monotonic(), value)
+        return value
 
     async def _drop_filter(self, s: dict) -> None:
         password = load_wifi_password(s["ssid"])

@@ -63,11 +63,17 @@ const S = {
 };
 
 const wave = new WaveChart($("#wave"), 60);
+const CHART_OPTS = {
+  breath: { floor: 0, minSpan: 6 },
+  heart: { floor: 30, minSpan: 16 },
+  motion: { yMin: 0, floor: 0, minSpan: 4 },
+  posture: { yMin: 0, yMax: 100, floor: 0 },
+};
 const charts = {
-  breath: new LineChart($("#t-breath"), { floor: 0, yFormat: (v) => v.toFixed(0) }),
-  heart: new LineChart($("#t-heart"), { floor: 30, yFormat: (v) => v.toFixed(0) }),
-  motion: new LineChart($("#t-motion"), { yMin: 0, floor: 0, yFormat: (v) => v.toFixed(0) }),
-  posture: new LineChart($("#t-posture"), { yMin: 0, yMax: 100, floor: 0, yFormat: (v) => v.toFixed(0) }),
+  breath: new LineChart($("#t-breath"), CHART_OPTS.breath),
+  heart: new LineChart($("#t-heart"), CHART_OPTS.heart),
+  motion: new LineChart($("#t-motion"), CHART_OPTS.motion),
+  posture: new LineChart($("#t-posture"), CHART_OPTS.posture),
 };
 const progress = {
   minutes: new BarChart($("#p-minutes"), { color: "--breath" }),
@@ -192,12 +198,19 @@ function onMetrics(m) {
     $("#posture-val").textContent = "--";
   }
 
-  // Signal line
-  const q = m.frames_per_s >= 20 && m.loss_pct < 10 ? "good" : m.frames_per_s >= 8 ? "fair" : m.frames_per_s > 0 ? "weak" : "none";
-  const src = S.status && S.status.packet_source ? ` · from ${S.status.packet_source}` : "";
-  $("#signal").textContent = m.frames_per_s > 0
-    ? `Signal ${q}: ${num(m.frames_per_s, 0)} frames/s · ${num(m.loss_pct, 0)}% lost · strength ${num(m.rssi, 0)} dBm · WiFi channel ${m.channel ?? "--"}${src}`
-    : "Signal: no data from the board yet.";
+  // Signal quality (icon + label, never colour alone)
+  const fps = m.frames_per_s || 0;
+  const q = fps <= 0 ? ["✕", "No data"] : fps >= 20 && m.loss_pct < 10 ? ["✓", "Good"] : fps >= 8 ? ["~", "Fair"] : ["!", "Weak"];
+  $("#sig-icon").textContent = q[0];
+  $("#sig-val").textContent = q[1];
+  $("#sig-fps").textContent = fps > 0 ? num(fps, 0) : "--";
+  $("#sig-loss").textContent = fps > 0 ? `${num(m.loss_pct, 0)}%` : "--";
+  $("#sig-rssi").textContent = m.rssi == null || fps <= 0 ? "--" : `${num(m.rssi, 0)} dBm`;
+  $("#sig-ch").textContent = m.channel ?? "--";
+  const src = S.status && S.status.packet_source;
+  $("#sig-note").textContent = fps <= 0 ? "Waiting for data from the board."
+    : q[1] === "Good" ? `Data arriving from ${src || "the board"}.`
+    : "Few frames are arriving. Move the board closer to the router, or away from metal and other electronics.";
 
   // Trends: session time when recording, otherwise a rolling 10 minutes.
   const t = m.session_t != null ? m.session_t : performance.now() / 1000 - S.pageStart;
@@ -610,7 +623,7 @@ async function openDetail(id) {
       <header class="card-h"><h2>${esc(meta.practice || "Session")} · ${esc(meta.started_at ? meta.started_at.slice(0, 16).replace("T", " ") : "")}</h2><span class="hint">${fmtClock(meta.duration_s)}${meta.demo ? " · demo data" : ""}</span></header>
       ${meta.intention ? `<p class="caption">Intention: ${esc(meta.intention)}</p>` : ""}
       <div class="tiles">
-        ${tile("Breathing", `${num(sm.breath_start)} → ${num(sm.breath_end)}`, "per min, first vs last 3 min")}
+        ${tile("Breathing", `${num(sm.breath_start)} → ${num(sm.breath_end)}`, "per min, start vs end")}
         ${tile("Slowest minute", num(sm.breath_lowest_minute), "breaths per min")}
         ${tile("Breath evenness", sm.breath_regularity == null ? "--" : Math.round(sm.breath_regularity * 100) + "%", "steadier is higher")}
         ${tile("Stillness", sm.stillness_pct == null ? "--" : num(sm.stillness_pct, 0) + "%", `${sm.shifts ?? 0} shifts`)}
@@ -646,10 +659,10 @@ async function openDetail(id) {
   const polar = evs.filter((e) => e.kind === "polar_hr").map((e) => [e.t, e.value]);
   const counts = evs.filter((e) => e.kind === "breath_count").map((e) => [e.t, e.value]);
   detailCharts = [
-    new LineChart($("#d-breath"), { floor: 0, xMin: 0 }),
-    new LineChart($("#d-heart"), { floor: 30, xMin: 0 }),
-    new LineChart($("#d-motion"), { yMin: 0, floor: 0, xMin: 0 }),
-    new LineChart($("#d-posture"), { yMin: 0, yMax: 100, floor: 0, xMin: 0 }),
+    new LineChart($("#d-breath"), { ...CHART_OPTS.breath, xMin: 0 }),
+    new LineChart($("#d-heart"), { ...CHART_OPTS.heart, xMin: 0 }),
+    new LineChart($("#d-motion"), { ...CHART_OPTS.motion, xMin: 0 }),
+    new LineChart($("#d-posture"), { ...CHART_OPTS.posture, xMin: 0 }),
   ];
   const breathSeries = [{ label: "Breathing", color: "--breath", points: pts("breath_rate"), unit: "/min", gap: 5 }];
   if (counts.length) breathSeries.push({ label: "Your count", color: "--text-secondary", points: counts, dots: true, digits: 0, unit: "/min" });

@@ -43,8 +43,9 @@ You can install and try MediSense **before the board arrives** (demo mode).
    If the folder in Downloads has a different name, type `bash ` and drag the
    `install.sh` file from that folder into the Terminal window, then press Return.
 
-The installer takes a few minutes. It needs no administrator password and
-installs nothing system-wide:
+If macOS asks whether Terminal may access files in your Downloads (or later
+Desktop) folder, click **OK**. The installer takes a few minutes. It needs no
+administrator password and installs nothing system-wide:
 
 - it moves MediSense to `~/Applications/MediSense`
 - it installs its own private Python, leaving the Mac's old one alone
@@ -142,7 +143,8 @@ Deleting a session in the app moves it to `~/MediSense/trash`.
 | "On WiFi but no data reaches this Mac" | Same WiFi on the Mac? macOS firewall: System Preferences → Security & Privacy → Firewall. Allow Python, or turn off "Block all incoming connections". |
 | Signal "Weak" | Move the board closer to the router, away from metal and other electronics. |
 | Breathing shows "--" for long | Sit still. Move the board so your chest is between it and the router. |
-| Camera posture doesn't start | Allow the camera when the browser asks. Safari: Safari → Settings for This Website → Camera. |
+| Camera posture doesn't start | Allow the camera when the browser asks. Safari: Safari → Settings for This Website → Camera. Chrome also needs System Preferences → Security & Privacy → Camera. |
+| macOS asks if "python3.12" may accept incoming connections | Click **Allow**: that's the board's data arriving. |
 
 Run a self-check any time in Terminal: `~/Applications/MediSense/.venv/bin/medisense doctor`
 

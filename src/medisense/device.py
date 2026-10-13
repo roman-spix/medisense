@@ -270,14 +270,12 @@ class BoardLog:
     csi_callbacks: int = 0
     streaming: bool = False
     boots: int = 0
-    last_line_at: float = 0.0
     recent: list = field(default_factory=list)
 
     def feed(self, line: str) -> None:
         line = ANSI_RE.sub("", line).strip()
         if not line:
             return
-        self.last_line_at = time.monotonic()
         self.recent.append(line)
         del self.recent[:-200]
         if m := re.search(r"CSI Node .*? v(\d+\.\d+\.\d+)", line):

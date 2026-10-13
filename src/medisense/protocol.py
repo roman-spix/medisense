@@ -28,7 +28,6 @@ import numpy as np
 
 CSI_MAGIC = 0xC5110001
 SYNC_MAGIC = 0xC511A110
-VITALS_MAGIC = 0xC5110002
 HEADER_SIZE = 20
 
 # The legacy long training field (LLTF) is always first in the CSI buffer and

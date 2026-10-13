@@ -1,4 +1,4 @@
-"""Where MediSense keeps things, and small persistent settings."""
+"""Where MediSense keeps things: paths, the board registry, WiFi passwords."""
 
 from __future__ import annotations
 
@@ -49,21 +49,6 @@ def _write_json(path: Path, obj) -> None:
     os.replace(tmp, path)
 
 
-class Settings:
-    """Small JSON settings file (~/MediSense/settings.json). No secrets in it."""
-
-    def __init__(self, path: Path | None = None):
-        self.path = path or data_dir() / "settings.json"
-        self.data: dict = _read_json(self.path, {})
-
-    def get(self, key: str, default=None):
-        return self.data.get(key, default)
-
-    def set(self, key: str, value) -> None:
-        self.data[key] = value
-        _write_json(self.path, self.data)
-
-
 class DeviceRegistry:
     """Boards MediSense has set up, keyed by MAC address (~/MediSense/devices.json)."""
 
@@ -76,10 +61,6 @@ class DeviceRegistry:
 
     def put(self, mac: str, info: dict) -> None:
         self.data[mac.lower()] = info
-        _write_json(self.path, self.data)
-
-    def forget(self, mac: str) -> None:
-        self.data.pop(mac.lower(), None)
         _write_json(self.path, self.data)
 
 

@@ -15,10 +15,7 @@ __pycache__/
 .vscode/
 .idea/
 
-# Local data never belongs in git (recordings live in ~/MediSense)
+# Recordings live in ~/MediSense and never belong in git
 *.mscap
 *.mscap.gz
-*.sqlite
-*.sqlite3
-*.db
 .env

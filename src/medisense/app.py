@@ -13,7 +13,7 @@ from typing import Any
 from aiohttp import web
 
 from . import __version__, network, sessions
-from .config import UDP_PORT, DeviceRegistry, Settings
+from .config import UDP_PORT, DeviceRegistry
 from .device import DeviceManager
 from .protocol import CSI_MAGIC, packet_kind, parse_csi
 from .recorder import SessionRecorder
@@ -50,13 +50,11 @@ class MediSenseApp:
         self.demo = demo
         self.udp_port = udp_port
         self.engine = VitalsEngine()
-        self.settings = Settings()
         self.registry = DeviceRegistry()
         self.clients: set[web.WebSocketResponse] = set()
         self.session: SessionRecorder | None = None
         self.last_packet = -1e9
         self.packet_source: str | None = None
-        self.packets = 0
         self.metrics: dict = {}
         self.posture: dict | None = None
         self.posture_at = -1e9
@@ -104,7 +102,6 @@ class MediSenseApp:
         frame = parse_csi(data)
         if frame is None:
             return
-        self.packets += 1
         if now - self.last_packet > 3:
             self._status_dirty = True
         self.last_packet = now

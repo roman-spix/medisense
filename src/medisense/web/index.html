@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediSense</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%232a78d6'/%3E%3Cpath d='M6 17c3-5 5 5 8 0s5-5 8 0 4 3 4 0' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="var(--breath)"/><path d="M6 17c3-5 5 5 8 0s5-5 8 0 4 3 4 0" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>
+    <span>MediSense</span>
+  </div>
+  <div id="pill" class="pill" role="status"><span class="dot"></span><span id="pill-text">Starting…</span></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="live" aria-selected="true">Live</button>
+    <button role="tab" data-tab="history" aria-selected="false">History</button>
+    <button role="tab" data-tab="board" aria-selected="false">Board</button>
+  </nav>
+  <button id="theme" class="ghost icon" title="Light / dark" aria-label="Switch light or dark theme">◐</button>
+</header>
+
+<main>
+  <!-- ============================================================ LIVE -->
+  <section id="tab-live" class="tab">
+    <div id="setup-slot"></div>
+
+    <div id="session-bar" class="card session-bar">
+      <div id="session-idle">
+        <div class="row wrap gap">
+          <label class="field">Practice
+            <select id="practice">
+              <option>Breath focus</option><option>Body scan</option><option>Open awareness</option>
+              <option>Loving-kindness</option><option>Mantra</option><option>Other</option>
+            </select>
+          </label>
+          <div class="field">Duration
+            <div class="chips" id="durations">
+              <button data-min="0" class="chip on">Open</button><button data-min="10" class="chip">10</button>
+              <button data-min="20" class="chip">20</button><button data-min="30" class="chip">30</button>
+              <button data-min="45" class="chip">45</button><button data-min="60" class="chip">60</button>
+            </div>
+          </div>
+          <label class="field grow">Intention (optional)
+            <input id="intention" maxlength="200" placeholder="e.g. stay with the breath, soften the shoulders">
+          </label>
+        </div>
+        <div class="row wrap gap between">
+          <label class="check"><input type="checkbox" id="use-camera"> Track posture with the webcam (video stays in this browser and is never saved)</label>
+          <button id="btn-start" class="primary big">Start session</button>
+        </div>
+      </div>
+      <div id="session-running" hidden>
+        <div class="row wrap gap between">
+          <div class="timer">
+            <div class="label" id="session-label">Session</div>
+            <div class="clock" id="clock">0:00</div>
+            <div class="sub" id="remaining"></div>
+          </div>
+          <div class="row wrap gap">
+            <button id="btn-mark" class="ghost" title="Shortcut: M">Mark moment <kbd>M</kbd></button>
+            <button id="btn-hr" class="ghost" title="Shortcut: H">Watch heart rate <kbd>H</kbd></button>
+            <button id="btn-count" class="ghost">60 s breath count</button>
+            <button id="btn-stop" class="danger">End session</button>
+          </div>
+        </div>
+        <div id="inline-form" class="inline-form" hidden></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <article class="card breath span2" aria-labelledby="h-breath">
+        <header class="card-h"><h2 id="h-breath">Breathing</h2><span class="hint" id="breath-note"></span></header>
+        <div class="row gap align-end">
+          <div class="hero"><span id="breath-val" class="hero-num">--</span><span class="unit">breaths / min</span></div>
+          <dl class="mini">
+            <div><dt>Confidence</dt><dd id="breath-conf">--</dd></div>
+            <div><dt>Evenness</dt><dd id="breath-reg">--</dd></div>
+          </dl>
+        </div>
+        <canvas id="wave" class="wave" aria-label="Live breathing waveform, last 60 seconds"></canvas>
+        <p class="caption">Live breath wave, last 60 s. Shaded where you moved. Up and down are just the two phases of each breath.</p>
+      </article>
+
+      <article class="card" aria-labelledby="h-heart">
+        <header class="card-h"><h2 id="h-heart">Heart rate</h2><span class="tag">rough</span></header>
+        <div class="hero"><span id="heart-val" class="hero-num small">--</span><span class="unit">beats / min</span></div>
+        <div class="meter" title="How clear the heartbeat is in the WiFi signal"><span id="heart-meter"></span></div>
+        <p class="caption" id="heart-note">From tiny chest movements in the WiFi signal. Compare with your Polar watch using “Watch heart rate”.</p>
+      </article>
+
+      <article class="card" aria-labelledby="h-still">
+        <header class="card-h"><h2 id="h-still">Stillness</h2></header>
+        <div class="state-line"><span id="still-icon" class="state-icon" aria-hidden="true">○</span><span id="still-val" class="state-text">--</span></div>
+        <canvas id="motion-spark" class="spark" aria-label="Movement, last 5 minutes"></canvas>
+        <dl class="mini wide">
+          <div><dt>Settled for</dt><dd id="settled">--</dd></div>
+          <div><dt>Shifts this session</dt><dd id="shifts">0</dd></div>
+        </dl>
+      </article>
+
+      <article class="card" aria-labelledby="h-posture">
+        <header class="card-h"><h2 id="h-posture">Posture</h2>
+          <div class="row gap-s"><button id="cam-toggle" class="ghost small">Camera on</button></div>
+        </header>
+        <div class="row gap align-end">
+          <div class="hero"><span id="posture-val" class="hero-num small">--</span><span class="unit">/ 100</span></div>
+          <dl class="mini">
+            <div><dt>Head drop</dt><dd id="posture-slump">--</dd></div>
+            <div><dt>Head tilt</dt><dd id="posture-tilt">--</dd></div>
+          </dl>
+        </div>
+        <canvas id="pose" class="pose" aria-label="Posture skeleton"></canvas>
+        <div class="row gap-s between">
+          <span class="caption" id="posture-note">Camera is off.</span>
+          <span class="row gap-s">
+            <button id="cam-video" class="ghost small" hidden>Show video</button>
+            <button id="cam-recal" class="ghost small" hidden>Recalibrate</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card span3" aria-labelledby="h-trend">
+        <header class="card-h"><h2 id="h-trend">Over time</h2><span class="hint" id="trend-hint">Last 10 minutes</span></header>
+        <div class="multiples">
+          <div><h3><span class="key" style="background:var(--breath)"></span>Breathing (per min)</h3><canvas id="t-breath"></canvas></div>
+          <div><h3><span class="key" style="background:var(--heart)"></span>Heart rate (per min, rough)</h3><canvas id="t-heart"></canvas></div>
+          <div><h3><span class="key" style="background:var(--motion)"></span>Movement (× quiet level)</h3><canvas id="t-motion"></canvas></div>
+          <div><h3><span class="key" style="background:var(--posture)"></span>Posture score</h3><canvas id="t-posture"></canvas></div>
+        </div>
+      </article>
+    </div>
+
+    <footer class="signal" id="signal">Signal: --</footer>
+  </section>
+
+  <!-- ========================================================= HISTORY -->
+  <section id="tab-history" class="tab" hidden>
+    <div id="history-empty" class="card empty" hidden>
+      <h2>No sessions yet</h2>
+      <p>Start a session on the Live tab. Every session is saved on this Mac in the MediSense folder in your home folder.</p>
+    </div>
+    <div id="history-body">
+      <article class="card">
+        <header class="card-h"><h2>Progress</h2><span class="hint">One column per session, oldest on the left</span></header>
+        <div class="multiples">
+          <div><h3><span class="key" style="background:var(--breath)"></span>Minutes meditated</h3><canvas id="p-minutes"></canvas></div>
+          <div><h3><span class="key" style="background:var(--breath)"></span>Breathing at the end (per min)</h3><canvas id="p-breath"></canvas></div>
+          <div><h3><span class="key" style="background:var(--motion)"></span>Stillness (% of time)</h3><canvas id="p-still"></canvas></div>
+          <div><h3><span class="key" style="background:var(--posture)"></span>Posture (average score)</h3><canvas id="p-posture"></canvas></div>
+        </div>
+      </article>
+      <article class="card">
+        <header class="card-h"><h2>Sessions</h2></header>
+        <div class="table-wrap">
+          <table class="sessions">
+            <thead><tr><th>When</th><th>Practice</th><th class="num">Minutes</th><th class="num">Breathing start → end</th><th class="num">Stillness</th><th class="num">Shifts</th><th class="num">Posture</th><th class="num">Rating</th></tr></thead>
+            <tbody id="sessions-rows"></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+    <div id="detail" hidden></div>
+  </section>
+
+  <!-- =========================================================== BOARD -->
+  <section id="tab-board" class="tab" hidden>
+    <div id="board-setup-slot"></div>
+    <article class="card">
+      <header class="card-h"><h2>Board</h2><div class="row gap-s"><button id="btn-reset" class="ghost small">Restart board</button><button id="btn-wifi" class="ghost small">Change WiFi</button></div></header>
+      <dl class="facts" id="board-facts"></dl>
+    </article>
+    <article class="card">
+      <header class="card-h"><h2>Board log</h2><span class="hint">Messages the board prints over USB</span></header>
+      <pre id="board-log" class="log">No messages yet.</pre>
+    </article>
+    <article class="card">
+      <header class="card-h"><h2>Getting good readings</h2></header>
+      <ul class="tips">
+        <li>Put the board <b>1–2 m from where you sit</b>, about chest height, with your body between the board and the WiFi router if you can.</li>
+        <li>The router should be in the same room or the next one. Breathing shows up best when the signal passes through or bounces off your chest.</li>
+        <li>Sit still for the first 30 seconds: the breathing number appears after about 20 seconds of quiet.</li>
+        <li>Keep other people and pets out of the room, and don't let fans or curtains move near the board.</li>
+        <li>For posture, put the laptop so the camera sees your head and shoulders (hips too if possible).</li>
+        <li>Heart rate from WiFi is rough. Check it against your Polar watch with “Watch heart rate” during sessions; that also helps improve MediSense later.</li>
+      </ul>
+    </article>
+  </section>
+</main>
+
+<dialog id="dlg-end">
+  <form method="dialog" id="end-form">
+    <h2>How was it?</h2>
+    <div class="field">Depth of the session
+      <div class="chips" id="rating">
+        <button type="button" data-v="1" class="chip">1</button><button type="button" data-v="2" class="chip">2</button>
+        <button type="button" data-v="3" class="chip">3</button><button type="button" data-v="4" class="chip">4</button>
+        <button type="button" data-v="5" class="chip">5</button>
+      </div>
+    </div>
+    <div class="field">How do you feel now?
+      <div class="chips" id="mood">
+        <button type="button" class="chip">Calm</button><button type="button" class="chip">Clear</button>
+        <button type="button" class="chip">Grateful</button><button type="button" class="chip">Sleepy</button>
+        <button type="button" class="chip">Restless</button><button type="button" class="chip">Emotional</button>
+      </div>
+    </div>
+    <label class="field">Polar watch average heart rate (optional)
+      <input id="end-polar" type="number" min="30" max="200" inputmode="numeric" placeholder="e.g. 61">
+    </label>
+    <label class="field">Notes
+      <textarea id="end-notes" rows="4" placeholder="What did you notice?"></textarea>
+    </label>
+    <div class="row gap between"><span class="caption" id="end-summary"></span><button class="primary" id="end-save" value="save">Save</button></div>
+  </form>
+</dialog>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

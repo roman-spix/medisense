@@ -100,7 +100,7 @@ async def _serve(args) -> int:
     url = f"http://localhost:{args.port}/"
     print(f"MediSense {__version__} is running: {url}")
     print(f"Recordings: {data_dir() / 'sessions'}")
-    print("Keep this window open while you use MediSense. Press Ctrl+C (or close it) to quit.\n")
+    print("Keep this window open while you use MediSense. Press Ctrl+C (or close it) to quit.\n", flush=True)
     if not args.no_browser:
         webbrowser.open(url)
 

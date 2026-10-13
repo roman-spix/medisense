@@ -76,7 +76,7 @@ jobs:
           .venv/bin/medisense demo --no-browser --quiet &
           for i in $(seq 1 30); do
             sleep 1
-            if curl -fs http://127.0.0.1:8765/api/status | grep -q '"live": true'; then echo "live after ${i}s"; ok=1; break; fi
+            if curl -fs http://127.0.0.1:8765/api/status | grep -Eq '"live": ?true'; then echo "live after ${i}s"; ok=1; break; fi
           done
           kill %1 || true
           [ "${ok:-}" = 1 ]

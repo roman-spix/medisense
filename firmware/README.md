@@ -1,8 +1,8 @@
 # Firmware for the ESP32-S3
 
-MediSense installs RuView's CSI firmware on your board for you (Setup page in
-the app). You never need to build or flash anything by hand. This folder
-holds the ready-made images and how they were made.
+MediSense installs RuView's CSI firmware on your board for you when you plug
+it in for the first time. You never need to build or flash anything by hand.
+This folder holds the ready-made images and how they were made.
 
 | Folder | For boards with | Flash layout |
 |---|---|---|
@@ -37,10 +37,15 @@ Changes from RuView's own release images, and why:
    newer versions need ESP-IDF 5.5, so the 0.8.8 tag no longer builds without
    it. RuView made the same fix later upstream.
 
-Each folder has `BUILDINFO.json` (exact inputs), `SHA256SUMS`, the full
-`build.log`, the resulting `sdkconfig.txt`, and `image_info.txt`.
-`build/dependencies.lock.*` pins the ESP-IDF component versions used, so
-rebuilds are repeatable.
+Each folder holds only what the app flashes: the four images,
+`flasher_args.json` (flash offsets), `BUILDINFO.json` (exact inputs) and
+`SHA256SUMS` (checked before every flash). `build/dependencies.lock.*` pins
+the ESP-IDF component versions used, so rebuilds are repeatable.
+
+The full build log, resulting `sdkconfig` and `image_info` for these exact
+images are in the git history (commit `bfb3173`, folders `esp32s3-*/`):
+`git show bfb3173:firmware/esp32s3-8mb/build.log`. ESP-IDF builds aren't
+byte-identical, so a later rebuild produces different (equivalent) files.
 
 ## How it was checked
 
@@ -64,6 +69,7 @@ the board ignores neighbours' WiFi).
 ## Rebuilding
 
 Push a change under `firmware/build/` or run the "Firmware (ESP32-S3)"
-workflow by hand on GitHub. Results land on the `firmware-build` branch; copy
-them here after checking `STATUS.md`, `SHA256SUMS` and the `ok:` lines in
-`build.log`.
+workflow by hand on GitHub. Results land on the `firmware-build` branch
+together with the build log and configuration. After checking `STATUS.md` and
+the `ok:` lines in `build.log`, copy the `.bin` files, `flasher_args.json`,
+`BUILDINFO.json` and `SHA256SUMS` of each variant into this folder.

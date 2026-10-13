@@ -4,7 +4,6 @@ network it's on, and the router's 2.4 GHz radio address (BSSID).
 
 from __future__ import annotations
 
-import ipaddress
 import re
 import shutil
 import socket
@@ -47,13 +46,6 @@ def local_ip(towards: str = "8.8.8.8") -> str | None:
         return None
     finally:
         s.close()
-
-
-def same_subnet(a: str, b: str, prefix: int = 24) -> bool:
-    try:
-        return ipaddress.ip_network(f"{a}/{prefix}", strict=False) == ipaddress.ip_network(f"{b}/{prefix}", strict=False)
-    except ValueError:
-        return False
 
 
 def wifi_device() -> str | None:

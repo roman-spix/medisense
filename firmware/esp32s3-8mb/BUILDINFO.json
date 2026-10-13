@@ -1,0 +1,13 @@
+{
+  "variant": "s3-8mb",
+  "chip": "esp32s3",
+  "flash_size": "8MB",
+  "partition_table": "partitions_display.csv",
+  "firmware_version": "0.8.8",
+  "ruview_commit": "e04f269f1a76eb6ed4e8cd33e2ccfeda6fd391a3",
+  "esp_idf": "ESP-IDF v5.4",
+  "sdkconfig_defaults": "sdkconfig.defaults;sdkconfig.defaults.devkitc;sdkconfig.defaults.medisense",
+  "patches": ["0001-led-strip-idf54.patch"],
+  "app_size_bytes": 902640,
+  "built_at": "2026-10-13T13:05:59Z"
+}

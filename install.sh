@@ -31,15 +31,10 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 [ -f pyproject.toml ] && grep -q 'name = "medisense"' pyproject.toml || die "run this script from inside the MediSense folder."
 NEW_VERSION="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
-OLD_VERSION=""
-if [ -f "$HOME/Applications/MediSense/pyproject.toml" ]; then
+# the version already installed (handed on when the script restarts itself from ~/Applications)
+OLD_VERSION="${MEDISENSE_OLD_VERSION:-}"
+if [ -z "$OLD_VERSION" ] && [ -f "$HOME/Applications/MediSense/pyproject.toml" ]; then
   OLD_VERSION="$(grep -m1 '^version = ' "$HOME/Applications/MediSense/pyproject.toml" | cut -d'"' -f2)"
-fi
-
-if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
-  say "Updating MediSense $OLD_VERSION → $NEW_VERSION (your recordings and board setup are kept)"
-else
-  say "Installing MediSense $NEW_VERSION"
 fi
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -59,7 +54,7 @@ case "$APP_DIR" in
   "$HOME/Downloads"/*|"$HOME/Desktop"/*)
     if [ "$OS" = "Darwin" ] && [ ! -d "$APP_DIR/.git" ]; then
       DEST="$HOME/Applications/MediSense"
-      say "Copying MediSense to $DEST (so it doesn't live in Downloads)"
+      say "Copying MediSense $NEW_VERSION to $DEST (so it doesn't live in Downloads)"
       mkdir -p "$DEST"
       # Replace the program files exactly (old files that the new version no
       # longer has are removed); the environments are rebuilt below and your
@@ -70,10 +65,16 @@ case "$APP_DIR" in
         (cd "$APP_DIR" && tar cf - --exclude ./.venv --exclude ./.venv-posture .) | (cd "$DEST" && tar xf -)
       fi
       ok "copied; you can delete the downloaded folder afterwards"
-      exec bash "$DEST/install.sh"
+      MEDISENSE_OLD_VERSION="${OLD_VERSION:-none}" exec bash "$DEST/install.sh"
     fi
     ;;
 esac
+
+if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "none" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  say "Updating MediSense $OLD_VERSION → $NEW_VERSION (your recordings and board setup are kept)"
+else
+  say "Installing MediSense $NEW_VERSION"
+fi
 
 # ------------------------------------------------------------------ uv
 mkdir -p "$TOOLS/bin"

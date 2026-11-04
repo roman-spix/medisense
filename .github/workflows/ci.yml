@@ -62,6 +62,10 @@ jobs:
         include:
           - runner: macos-15-intel
             label: Intel Mac
+          # Intel Mac runners are sometimes unavailable; the posture engine's
+          # Apple Vision code and the installer are the same on Apple silicon.
+          - runner: macos-15
+            label: Apple silicon Mac
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

@@ -30,7 +30,7 @@ For the setup you have now: the MacBook, the ESP32-S3 board and the webcam
    pulse sensor; ignore it for now).
 4. Quick check: double-click **MediSense Demo**. Within a few seconds the
    badge at the top says **Live · demo**. If a page ever stays at
-   "Starting…", press **⌘⇧R** once to reload it.
+   "Starting…", press **⌘R** once to reload it.
 
 ## 3. Update the board
 

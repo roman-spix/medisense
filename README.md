@@ -229,7 +229,7 @@ Deleting a session in the app moves it to `~/MediSense/trash`.
 | Signal "Weak" | Move the board closer to the router, away from metal and other electronics. |
 | Breathing shows "--" for long | Sit still. Move the board so your chest is between it and the router. |
 | Camera posture doesn't start | Allow the camera when the browser asks. Safari: Safari → Settings for This Website → Camera. Chrome: also System Preferences → Security & Privacy → Camera → Google Chrome. |
-| A page stays at "Starting…" | Reload it with ⌘⇧R. (Version 0.2.0 could load old cached page code after an update; 0.2.1 can't.) |
+| A page stays at "Starting…" | Reload it with ⌘R. (Version 0.2.0 could load old cached page code after an update; 0.2.1 can't.) |
 | No posture notifications | System Preferences → Notifications → **Script Editor** → Allow Notifications. Test it with **Send a test notification** in MediSense Posture. |
 | Data keeps pausing | Plug the board into the Mac during a session: the Board tab's **Interruptions** list then says why (WiFi drop with a reason code, power dip, restart). |
 | macOS asks if "python3.12" may accept incoming connections | Click **Allow**: that's the board's data arriving. |

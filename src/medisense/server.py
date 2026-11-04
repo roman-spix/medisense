@@ -16,8 +16,9 @@ import sys
 
 from aiohttp import WSMsgType, web
 
-from . import assets, sessions
-from .app import MediSenseApp, dumps
+from . import assets, insights, sessions
+from .app import MediSenseApp
+from .webutil import dumps, guard, json_body as _json
 from .config import WEB_DIR, load_wifi_password
 
 log = logging.getLogger("medisense.server")
@@ -25,31 +26,8 @@ log = logging.getLogger("medisense.server")
 APP_KEY = web.AppKey("medisense", MediSenseApp)
 
 
-@web.middleware
-async def guard(request: web.Request, handler):
-    host = (request.host or "").split(":")[0]
-    if host not in ("localhost", "127.0.0.1", "[::1]", "::1"):
-        return web.Response(status=403, text="MediSense only answers on localhost.")
-    if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get("X-MediSense") != "1":
-        return web.Response(status=403, text="missing X-MediSense header")
-    try:
-        return await handler(request)
-    except (ValueError, RuntimeError) as e:
-        return web.json_response({"error": str(e)}, status=400)
-
-
 def _app(request: web.Request) -> MediSenseApp:
     return request.app[APP_KEY]
-
-
-async def _json(request: web.Request) -> dict:
-    try:
-        data = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise ValueError("bad JSON") from None
-    if not isinstance(data, dict):
-        raise ValueError("expected an object")
-    return data
 
 
 async def index(request: web.Request) -> web.StreamResponse:
@@ -66,6 +44,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     await ws.send_str(dumps({"type": "status", **app.status()}))
     if app.metrics:
         await ws.send_str(dumps({"type": "metrics", **app.metrics}))
+    await ws.send_str(dumps({"type": "posture", **app.posture_state(), "lm": None}))
     try:
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
@@ -74,10 +53,23 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 data = json.loads(msg.data)
             except ValueError:
                 continue
-            if isinstance(data, dict) and data.get("type") == "posture":
-                app.on_posture(data)
+            if not isinstance(data, dict):
+                continue
+            if data.get("type") == "pose" and app.camera_on:
+                # the page's own camera (when the background engine isn't installed)
+                try:
+                    aspect = float(data.get("aspect") or 4 / 3)
+                except (TypeError, ValueError):
+                    aspect = 4 / 3
+                app.posture_service.feed(data.get("lm"), data.get("world"), aspect, source="browser")
+            elif data.get("type") == "preview":
+                (app.preview_clients.add if data.get("on") else app.preview_clients.discard)(ws)
+                await app.posture_service.set_preview(bool(app.preview_clients))
     finally:
         app.clients.discard(ws)
+        if ws in app.preview_clients:
+            app.preview_clients.discard(ws)
+            await app.posture_service.set_preview(bool(app.preview_clients))
     return ws
 
 
@@ -106,7 +98,11 @@ async def api_reset(request: web.Request) -> web.Response:
 
 async def api_session_start(request: web.Request) -> web.Response:
     d = await _json(request)
-    return web.json_response(_app(request).start_session(d))
+    app = _app(request)
+    out = app.start_session(d)
+    if d.get("posture_camera") and not app.camera_on:
+        await app.set_camera(True)
+    return web.json_response(out)
 
 
 async def api_session_stop(request: web.Request) -> web.Response:
@@ -165,6 +161,36 @@ async def api_session_open(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "path": str(p)})
 
 
+async def api_posture(request: web.Request) -> web.Response:
+    return web.json_response(_app(request).posture_state(), dumps=dumps)
+
+
+async def api_posture_camera(request: web.Request) -> web.Response:
+    d = await _json(request)
+    return web.json_response(await _app(request).set_camera(bool(d.get("on"))), dumps=dumps)
+
+
+async def api_posture_calibrate(request: web.Request) -> web.Response:
+    app = _app(request)
+    if not app.camera_on:
+        raise ValueError("Turn the camera on first.")
+    app.posture_tracker.start_calibration(5.0)
+    return web.json_response({"ok": True, "seconds": 5})
+
+
+async def api_posture_settings(request: web.Request) -> web.Response:
+    d = await _json(request)
+    app = _app(request)
+    allowed = {k: d[k] for k in ("enabled", "threshold", "hold_s", "cooldown_s", "sound") if k in d}
+    app.posture_tracker.set_settings({**allowed, "mode": "meditation"})
+    return web.json_response(app.posture_state(), dumps=dumps)
+
+
+async def api_profile(request: web.Request) -> web.Response:
+    metas = await asyncio.to_thread(sessions.list_sessions)
+    return web.json_response(insights.profile(metas), dumps=dumps)
+
+
 async def api_session_delete(request: web.Request) -> web.Response:
     app = _app(request)
     sid = request.match_info["sid"]
@@ -206,6 +232,11 @@ def build(app: MediSenseApp) -> web.Application:
         web.post("/api/session/start", api_session_start),
         web.post("/api/session/stop", api_session_stop),
         web.post("/api/session/event", api_session_event),
+        web.get("/api/posture", api_posture),
+        web.post("/api/posture/camera", api_posture_camera),
+        web.post("/api/posture/calibrate", api_posture_calibrate),
+        web.post("/api/posture/settings", api_posture_settings),
+        web.get("/api/profile", api_profile),
         web.get("/api/sessions", api_sessions),
         web.get("/api/sessions/{sid}", api_session),
         web.get("/api/sessions/{sid}/wave", api_session_wave),

@@ -170,3 +170,41 @@ def test_airport_scan_parsing():
     aps = parse_airport_scan(out)
     assert [(a.ssid, a.bssid, a.channel) for a in aps] == [
         ("Home Net", "a4:2b:b0:01:02:0f", 6), ("Home Net", "a4:2b:b0:01:02:10", 149), ("Neighbour", "00:11:22:33:44:55", 11)]
+
+
+# ------------------------------------------------------------ firmware update
+
+@pytest.mark.parametrize("saved_password", [True, False])
+async def test_known_board_with_old_firmware_is_updated(tmp_path, monkeypatch, saved_password):
+    """A board set up with an older MediSense firmware is updated in place
+    (same WiFi settings) when its WiFi password is in the Keychain."""
+    from medisense import device
+    from medisense.config import DeviceRegistry
+
+    reg = DeviceRegistry(tmp_path / "devices.json")
+    mac = "aa:bb:cc:dd:ee:ff"
+    reg.put(mac, {"firmware_sha": "old", "settings": {"ssid": "Home", "target_ip": "192.168.1.20",
+                                                    "target_port": 5005, "node_id": 1, "filter_mac": None}})
+    chip = device.ChipInfo("ESP32-S3 (QFN56)", mac, "8MB")
+
+    async def fake_identify(port):
+        return chip
+
+    monkeypatch.setattr(device, "identify", fake_identify)
+    monkeypatch.setattr(device, "load_wifi_password", lambda ssid: "secret123" if saved_password else None)
+    monkeypatch.setattr(device.network, "local_ip", lambda *a: "192.168.1.21")
+    monkeypatch.setattr(device.network, "current_ssid", lambda: "Home")
+    calls = []
+
+    async def fake_provision(self, settings, full):
+        calls.append((settings, full))
+
+    monkeypatch.setattr(device.DeviceManager, "_provision", fake_provision)
+    dm = device.DeviceManager(reg, lambda: None, lambda: -1e9)
+    await dm._plugged(device.UsbPort("/dev/cu.usbmodem1", 0x303A, 0x1001, "USB JTAG", "x"))
+    if saved_password:
+        assert len(calls) == 1 and calls[0][1] is True
+        s = calls[0][0]
+        assert s.ssid == "Home" and s.password == "secret123" and s.target_ip == "192.168.1.21"
+    else:
+        assert not calls and dm.state == "needs_setup" and "update" in dm.message

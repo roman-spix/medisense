@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import platform
 import signal
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
@@ -91,14 +93,19 @@ async def _serve(args) -> int:
     from .app import MediSenseApp
     from .server import build
 
-    app = MediSenseApp(demo=args.demo, udp_port=args.udp_port)
+    if getattr(args, "pro", False):
+        from .pro import ProApp
+
+        app = ProApp(demo=args.demo, udp_port=args.udp_port)
+    else:
+        app = MediSenseApp(demo=args.demo, udp_port=args.udp_port)
     await app.start()
     runner = web.AppRunner(build(app), access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", args.port)
     await site.start()
     url = f"http://localhost:{args.port}/"
-    print(f"MediSense {__version__} is running: {url}")
+    print(f"MediSense{' Pro' if app.pro else ''} {__version__} is running: {url}")
     print(f"Recordings: {data_dir() / 'sessions'}")
     print("Keep this window open while you use MediSense. Press Ctrl+C (or close it) to quit.\n", flush=True)
     if not args.no_browser:
@@ -128,7 +135,7 @@ def cmd_start(args) -> int:
             webbrowser.open(f"http://localhost:{args.port}/")
         return 0
     if not _port_free(args.port):
-        print(f"Port {args.port} is used by another program. Try: medisense start --port 8766")
+        print(f"Port {args.port} is used by another program. Try: medisense start --port 8767")
         return 1
     if not _port_free(args.udp_port, socket.SOCK_DGRAM, "0.0.0.0"):
         print(f"UDP port {args.udp_port} (board data) is used by another program. Close it and try again.")
@@ -140,6 +147,81 @@ def cmd_start(args) -> int:
     )
     try:
         return asyncio.run(_serve(args))
+    except KeyboardInterrupt:
+        return 0
+
+
+async def _serve_posture(args) -> int:
+    from aiohttp import web
+
+    from .posture_app import PostureApp, build
+
+    app = PostureApp()
+    await app.start()
+    runner = web.AppRunner(build(app), access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", args.port).start()
+    url = f"http://localhost:{args.port}/"
+    print(f"MediSense Posture is running: {url}")
+    print("It watches your posture with the camera and sends a macOS notification when it drifts.")
+    print("Keep this window open (you can minimise it). Press Ctrl+C or close it to quit.\n", flush=True)
+    if not args.no_browser:
+        webbrowser.open(url)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGHUP", signal.SIGTERM)):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+    async def line() -> None:
+        tty = sys.stdout.isatty()
+        while True:
+            await asyncio.sleep(2.0)
+            cur = app.tracker.current
+            sc = cur.get("score")
+            svc = app.service.snapshot()
+            text = (f"[{(svc['state'] or '').upper()}] posture {sc:.0f}/100 {cur.get('state', '')}" if sc is not None
+                    else f"[{(svc['state'] or '').upper()}] {cur.get('state', 'waiting')}")
+            if svc.get("error"):
+                text += f"  {svc['error']}"
+            text += f"  reminders sent: {app.tracker.alerts}"
+            if tty and not args.quiet:
+                sys.stdout.write("\r\033[K" + text[:150])
+                sys.stdout.flush()
+
+    view = asyncio.create_task(line())
+    await stop.wait()
+    print("\nStopping…")
+    view.cancel()
+    await app.stop()
+    await runner.cleanup()
+    return 0
+
+
+def cmd_posture(args) -> int:
+    from .posture_app import POSTURE_PORT
+
+    port = args.port or POSTURE_PORT
+    args.port = port
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1) as r:
+            if b'"service"' in r.read():
+                print(f"MediSense Posture is already running. Opening http://localhost:{port}/")
+                if not args.no_browser:
+                    webbrowser.open(f"http://localhost:{port}/")
+                return 0
+    except Exception:
+        pass
+    if not _port_free(port):
+        print(f"Port {port} is used by another program. Try: medisense posture --port 8768")
+        return 1
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+                        filename=str(data_dir() / "posture.log"))
+    try:
+        return asyncio.run(_serve_posture(args))
     except KeyboardInterrupt:
         return 0
 
@@ -203,7 +285,23 @@ def cmd_doctor(args) -> int:
     from . import assets
 
     line(None if not assets.ready() else True,
-         "webcam posture model " + ("downloaded" if assets.ready() else "not downloaded yet (happens on first camera use)"))
+         "browser posture model " + ("downloaded" if assets.ready() else "not downloaded yet (happens on first camera use)"))
+    from . import posture_service
+
+    py = posture_service.posture_python()
+    if py is None:
+        line(None, "posture camera engine not installed (posture uses the browser camera; run install.sh to add it)")
+    else:
+        try:
+            r = subprocess.run([str(py), "-I", str(posture_service.ENGINE), "--check"], capture_output=True, text=True, timeout=60)
+            info = json.loads((r.stdout.strip().splitlines() or ["{}"])[-1])
+            line(info.get("type") == "ok", f"posture camera engine: MediaPipe {info.get('mediapipe', '?')}, OpenCV {info.get('opencv', '?')}"
+                 if info.get("type") == "ok" else f"posture camera engine: {info.get('message') or r.stderr.strip()[-200:]}")
+        except Exception as e:
+            line(False, f"posture camera engine: {e}")
+    full = assets.asset_dir() / assets.FULL_MODEL_NAME
+    line(None if not full.exists() else True,
+         "background posture model " + ("downloaded" if full.exists() else "not downloaded yet (happens on first camera use)"))
     print("\nAll good." if ok else "\nSome checks failed; see above.")
     return 0 if ok else 1
 
@@ -262,13 +360,20 @@ def cmd_reprocess(args) -> int:
 def cmd_fetch_assets(args) -> int:
     from . import assets
 
+    code = 0
     try:
-        assets.fetch_sync()
-        print(f"Webcam posture model ready in {assets.asset_dir()}")
-        return 0
+        assets.fetch_full_model_sync()
+        print(f"Posture model for the background camera engine ready in {assets.asset_dir()}")
     except Exception as e:
         print(f"Could not download the posture model now ({e}). It will be retried when you turn the camera on.")
-        return 1
+        code = 1
+    try:
+        assets.fetch_sync()
+        print("Posture model for the browser camera ready")
+    except Exception as e:
+        print(f"Could not download the browser posture model now ({e}). It will be retried when needed.")
+        code = 1
+    return code
 
 
 def main(argv=None) -> None:
@@ -282,10 +387,20 @@ def main(argv=None) -> None:
         p.add_argument("--no-browser", action="store_true", help="don't open the browser")
         p.add_argument("--quiet", action="store_true", help="no live line in the terminal")
         p.add_argument("--verbose", action="store_true", help="detailed log in ~/MediSense/medisense.log")
-        p.set_defaults(func=cmd_start, demo=demo)
+        p.set_defaults(func=cmd_start, demo=demo, pro=False)
 
     add_start(sub.add_parser("start", help="run MediSense (default)"), demo=False)
     add_start(sub.add_parser("demo", help="run with a simulated meditator, no board needed"), demo=True)
+    pro = sub.add_parser("pro", help="MediSense Pro: the board plus a 60 GHz radar and a pulse sensor")
+    add_start(pro, demo=False)
+    pro.add_argument("--demo", action="store_true", help="simulated board, radar and pulse sensor")
+    pro.set_defaults(pro=True)
+    pp = sub.add_parser("posture", help="MediSense Posture: posture reminders in the background")
+    pp.add_argument("--port", type=int, default=0, help="page port (default 8766)")
+    pp.add_argument("--no-browser", action="store_true")
+    pp.add_argument("--quiet", action="store_true")
+    pp.add_argument("--verbose", action="store_true")
+    pp.set_defaults(func=cmd_posture)
     sub.add_parser("doctor", help="check the installation").set_defaults(func=cmd_doctor)
     sub.add_parser("sessions", help="list recorded sessions").set_defaults(func=cmd_sessions)
     rp = sub.add_parser("reprocess", help="re-analyse a session's raw capture")

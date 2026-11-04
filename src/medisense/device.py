@@ -433,6 +433,7 @@ class DeviceManager:
         self._ignored: set[str] = set()
         self._saved_pw = False
         self._missing_since: float | None = None
+        self.line_listeners: list[Callable[[str], None]] = []
         self._fw_checked = (-1e9, None)
 
     async def _refresh_ssid(self) -> None:
@@ -457,6 +458,7 @@ class DeviceManager:
             "board_ip": self.log.board_ip,
             "board_wifi": self.log.wifi,
             "board_firmware": self.log.firmware_version,
+            "firmware_label": reg.get("firmware_version") if reg else None,  # what MediSense installed
             "csi_callbacks": self.log.csi_callbacks,
             "configured": reg.get("settings") if reg else None,
             "suggested_ssid": self.suggested_ssid,
@@ -604,6 +606,19 @@ class DeviceManager:
             self._start_monitor(reset=True)
             self._set("starting", "Board ready. Waiting for it to join the WiFi…")
             return
+        if reg and reg.get("settings", {}).get("ssid"):
+            # A board set up earlier, with older firmware: update it in place
+            # (same WiFi settings) when the password is in the Keychain.
+            ssid = reg["settings"]["ssid"]
+            password = await asyncio.to_thread(load_wifi_password, ssid)
+            if password is not None:
+                want_ip = await asyncio.to_thread(network.local_ip) or reg["settings"]["target_ip"]
+                settings = firmware.BoardSettings(**{**reg["settings"], "password": password, "target_ip": want_ip})
+                self._set("flashing", f"Updating the board to MediSense firmware {image.version}…", 0)
+                await self._provision(settings, full=True)
+                return
+            self._set("needs_setup", "A firmware update is ready for this board. Enter your WiFi password once to install it.")
+            return
         self._set("needs_setup", "New board. Set it up once: MediSense installs its firmware and your WiFi details.")
 
     async def _provision(self, settings: firmware.BoardSettings, full: bool) -> None:
@@ -675,6 +690,11 @@ class DeviceManager:
     def _on_log_line(self, line: str) -> None:
         before = self._log_key()
         self.log.feed(line)
+        for listener in self.line_listeners:
+            try:
+                listener(line)
+            except Exception:
+                log.exception("board log listener")
         if self._log_key() != before:
             self._check_health()
 
@@ -683,7 +703,7 @@ class DeviceManager:
         if self.busy or self.state in ("needs_setup", "unsupported", "identifying", "flashing"):
             return
         now = time.monotonic()
-        receiving = now - self.data_seen() < 3
+        receiving = now - self.data_seen() < 10  # short WiFi hiccups aren't a disconnection
         if receiving:
             if self.state != "connected" or "Live" not in self.message:
                 self._set("connected", f"Live. Board on WiFi{f' at {self.log.board_ip}' if self.log.board_ip else ''}.")

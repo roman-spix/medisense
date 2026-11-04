@@ -8,7 +8,9 @@
 #   1. downloads uv (a small, checksum-verified tool) into ~/.medisense/bin
 #   2. uses it to install a private Python 3.12 into ~/.medisense/python
 #   3. installs MediSense and its libraries into this folder (.venv)
-#   4. puts "MediSense" and "MediSense Demo" launchers on your Desktop
+#   4. installs the posture camera engine (MediaPipe) into .venv-posture
+#   5. puts "MediSense", "MediSense Demo", "MediSense Posture" and
+#      "MediSense Pro" (radar + pulse sensor) launchers on your Desktop
 #
 # Safe to run again at any time (for example after downloading an update).
 # Your recordings live in ~/MediSense and are never touched by this script.
@@ -116,6 +118,29 @@ else
 fi
 ok "installed into $APP_DIR/.venv"
 
+# ------------------------------------------------------- posture engine
+# Optional: without it, posture still works with the browser's camera (the
+# page must then stay open and visible).
+say "Installing the posture camera engine (MediaPipe, about 60 MB)"
+rm -rf .venv-posture
+"$UV" venv --quiet --python "$PY_VERSION" .venv-posture
+if [ "$OS" = "Darwin" ]; then
+  POSTURE_OK=0
+  "$UV" pip install --quiet --python .venv-posture/bin/python --no-deps --require-hashes \
+    --only-binary :all: -r requirements-posture-macos.txt && POSTURE_OK=1
+else
+  POSTURE_OK=0
+  "$UV" pip install --quiet --python .venv-posture/bin/python --no-deps --only-binary :all: \
+    mediapipe==0.10.21 numpy==1.26.4 opencv-python-headless==4.9.0.80 absl-py attrs flatbuffers \
+    protobuf==4.25.9 && POSTURE_OK=1
+fi
+if [ "$POSTURE_OK" = 1 ] && .venv-posture/bin/python -I src/medisense/posture_engine.py --check >/dev/null 2>&1; then
+  ok "posture engine ready (works in the background, even with the page closed)"
+else
+  rm -rf .venv-posture
+  printf '  ! posture engine not installed: posture will use the browser camera instead\n'
+fi
+
 # ------------------------------------------------------------ launchers
 make_launcher() {  # name, command
   local f="$HOME/Desktop/$1.command"
@@ -130,11 +155,13 @@ LAUNCH
 if [ -d "$HOME/Desktop" ]; then
   make_launcher "MediSense" "start"
   make_launcher "MediSense Demo" "demo"
-  ok "Desktop launchers: MediSense, MediSense Demo"
+  make_launcher "MediSense Posture" "posture"
+  make_launcher "MediSense Pro" "pro"
+  ok "Desktop launchers: MediSense, MediSense Demo, MediSense Posture, MediSense Pro"
 fi
 
 # --------------------------------------------------------- final checks
-say "Downloading the webcam posture model (optional, ~25 MB)"
+say "Downloading the posture models (optional, about 35 MB)"
 .venv/bin/medisense fetch-assets || true
 
 say "Checking the installation"
@@ -146,6 +173,8 @@ $(printf '\033[1m')MediSense is installed.$(printf '\033[0m')
 
   • Double-click "MediSense" on your Desktop to start (it opens in your browser).
   • No board yet? Double-click "MediSense Demo" to try it with a simulated meditator.
+  • Posture reminders all day: double-click "MediSense Posture". The first time,
+    macOS asks to allow the camera (for Terminal) and notifications (Script Editor).
   • From Terminal: $APP_DIR/.venv/bin/medisense start
   • Your recordings are kept in: $HOME/MediSense
 

@@ -192,3 +192,85 @@ def find_peaks_simple(x: np.ndarray, min_distance: int, min_prominence: float) -
             if x[i] - min(x[lo:i + 1].min(), x[i:hi].min()) >= min_prominence:
                 keep.append(int(i))
     return np.array(sorted(keep), dtype=int)
+
+
+def fft_bandpass(x: np.ndarray, fs: float, lo: float, hi: float, edge: float = 0.03, axis: int = 0) -> np.ndarray:
+    """Zero-phase band-pass by spectral masking with cosine edges (fast for windows).
+
+    The signal is mirrored at both ends first so the window edges don't ring.
+    """
+    x = np.moveaxis(np.asarray(x, dtype=np.float64), axis, 0)
+    n = x.shape[0]
+    if n < 8:
+        return np.moveaxis(np.zeros_like(x), 0, axis)
+    pad = min(n - 1, int(fs / max(lo, 1e-3)))
+    xp = np.concatenate([x[pad:0:-1], x, x[-2:-pad - 2:-1]], axis=0) if pad > 0 else x
+    m = xp.shape[0]
+    f = np.fft.rfftfreq(m, 1.0 / fs)
+    mask = _band_mask(f, lo, hi, edge)
+    shape = (len(mask),) + (1,) * (xp.ndim - 1)
+    y = np.fft.irfft(np.fft.rfft(xp, axis=0) * mask.reshape(shape), n=m, axis=0)
+    if pad > 0:
+        y = y[pad:pad + n]
+    return np.moveaxis(y, 0, axis)
+
+
+def _band_mask(f: np.ndarray, lo: float, hi: float, edge: float = 0.03) -> np.ndarray:
+    mask = np.zeros_like(f)
+    w_lo, w_hi = max(edge, lo * 0.3), max(edge, hi * 0.1)
+    mask[(f >= lo) & (f <= hi)] = 1.0
+    rise = (f > lo - w_lo) & (f < lo)
+    mask[rise] = 0.5 - 0.5 * np.cos(np.pi * (f[rise] - (lo - w_lo)) / w_lo)
+    fall = (f > hi) & (f < hi + w_hi)
+    mask[fall] = 0.5 + 0.5 * np.cos(np.pi * (f[fall] - hi) / w_hi)
+    return mask
+
+
+_NOISE_ACF_CACHE: dict = {}
+
+
+def bandpass_noise_acf(fs: float, lo: float, hi: float, n: int, max_lag: int) -> np.ndarray:
+    """Expected (biased) autocorrelation of white noise after fft_bandpass.
+
+    Every subcarrier's noise goes through the same filter, so this ripple
+    does not average out across subcarriers; subtract it to see breathing.
+    """
+    key = (fs, lo, hi)
+    base = _NOISE_ACF_CACHE.get(key)
+    if base is None or len(base) <= max_lag:
+        f = np.linspace(0, fs / 2, 4097)
+        m2 = _band_mask(f, lo, hi) ** 2
+        lags = np.arange(max(max_lag, int(60 * fs)) + 1) / fs
+        r = (m2[None, :] * np.cos(2 * np.pi * np.outer(lags, f))).sum(axis=1)
+        base = r / r[0]
+        _NOISE_ACF_CACHE[key] = base
+    return base[: max_lag + 1] * (1 - np.arange(max_lag + 1) / max(n, 1))
+
+
+def autocorr(x: np.ndarray, max_lag: int) -> np.ndarray:
+    """Normalised autocorrelation along axis 0 for lags 0..max_lag (via FFT)."""
+    x = np.asarray(x, dtype=np.float64)
+    x = x - x.mean(axis=0)
+    n = x.shape[0]
+    nfft = 1 << (2 * n - 1).bit_length()
+    f = np.fft.rfft(x, nfft, axis=0)
+    # biased estimate: long lags (fewer overlapping samples) are naturally
+    # damped, so a period's multiples never outscore the period itself
+    r = np.fft.irfft(f * np.conj(f), nfft, axis=0)[: max_lag + 1]
+    r0 = r[0]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = np.where(r0 > 0, r / r0, 0.0)
+    return r
+
+
+def detrend(x: np.ndarray, axis: int = 0) -> np.ndarray:
+    """Remove the least-squares line along `axis`."""
+    x = np.moveaxis(np.asarray(x, dtype=np.float64), axis, 0)
+    n = x.shape[0]
+    if n < 3:
+        return np.moveaxis(x - x.mean(axis=0), 0, axis)
+    t = np.linspace(-1.0, 1.0, n)
+    a = x.mean(axis=0)
+    b = np.tensordot(t, x - a, axes=(0, 0)) / np.dot(t, t)
+    y = x - a - np.multiply.outer(t, b)
+    return np.moveaxis(y, 0, axis)

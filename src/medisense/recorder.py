@@ -32,10 +32,16 @@ _REC = struct.Struct("<dH")
 
 METRIC_FIELDS = [
     "t", "signal", "frames_per_s", "loss_pct", "rssi", "breath_rate", "breath_conf", "breath_regularity",
-    "heart_rate", "heart_conf", "motion", "motion_state", "presence", "settled_s",
-    "posture_score", "slump", "head_tilt", "shoulder_tilt", "lean",
+    "heart_rate", "heart_conf", "heart_rate_experimental", "motion", "motion_state", "presence", "settled_s",
+    "gap_s", "data_quality", "frame_class",
+    "posture_score", "slump", "head_tilt", "shoulder_tilt", "lean", "posture_faults",
+    "state", "sensor_hr", "sensor_hr_source", "sensor_br", "hrv_rmssd", "coherence",
+    "breath_rate_wifi", "breath_source", "hrv_sdnn", "pulse_quality",
 ]
-POSTURE_FIELDS = ["t", "score", "slump", "head_drop", "head_tilt", "shoulder_tilt", "lean", "visible", "camera_motion"]
+POSTURE_FIELDS = [  # one row per 0.5 s while the camera sees you: the score and each check's measurement
+    "t", "score", "state", "faults", "head_drop", "chin", "head_forward", "head_level", "face_forward",
+    "shoulders_level", "shoulders_relaxed", "lean", "head_over_spine", "slouch", "tipped_forward", "hands", "visible",
+]
 
 
 def new_session_id(now: datetime | None = None) -> str:
@@ -70,6 +76,7 @@ class SessionRecorder:
         self._wave.writerow(["t", "breath", "motion"])
         self._posture_f = None
         self._posture = None
+        self._board_f = None
         self._events_f = open(path / "events.jsonl", "w")
         self._raw = gzip.open(path / "raw.mscap.gz", "wb", compresslevel=5)
         self._raw.write(CAPTURE_MAGIC)
@@ -114,6 +121,14 @@ class SessionRecorder:
             self._posture.writeheader()
         self._posture.writerow({**p, "t": self.rel(t_mono)})
 
+    def board_line(self, t_mono: float, line: str) -> None:
+        """The board's own log (when on USB): diagnoses interruptions later."""
+        if self.closed:
+            return
+        if self._board_f is None:
+            self._board_f = open(self.path / "board.log", "w")
+        self._board_f.write(f"{self.rel(t_mono):9.2f} {line.rstrip()}\n")
+
     def event(self, t_mono: float, kind: str, **data) -> dict:
         ev = {"t": self.rel(t_mono), "kind": kind, **data}
         if not self.closed:
@@ -125,7 +140,7 @@ class SessionRecorder:
         now = time.monotonic()
         if now - self._last_flush >= 10:
             self._last_flush = now
-            for f in (self._metrics_f, self._wave_f, self._posture_f, self._raw):
+            for f in (self._metrics_f, self._wave_f, self._posture_f, self._raw, self._board_f):
                 if f is not None:
                     f.flush()
 
@@ -140,7 +155,7 @@ class SessionRecorder:
         self.meta["ended_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
         self.meta["duration_s"] = round(time.monotonic() - self.t0_mono, 1)
         self.meta.update(fields)
-        for f in (self._metrics_f, self._wave_f, self._posture_f, self._events_f, self._raw):
+        for f in (self._metrics_f, self._wave_f, self._posture_f, self._events_f, self._raw, self._board_f):
             if f is not None:
                 f.close()
         self._write_meta()

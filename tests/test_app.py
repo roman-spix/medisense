@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +13,11 @@ from medisense.simulator import Scenario, SyntheticBody
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDISENSE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEDISENSE_POSTURE_NATIVE", "0")  # no camera here: the page's camera path
     return tmp_path / "home"
+
+
+POSE = json.loads((Path(__file__).parent / "data" / "pose_upright.json").read_text())
 
 
 def test_recorder_roundtrip(home):
@@ -107,15 +113,30 @@ async def test_session_flow(client):
     r = await client.post("/api/session/event", json={"kind": "rm -rf"}, headers=H)
     assert r.status == 400
 
+    # posture: no background engine here, so the page's camera sends landmarks
+    r = await client.post("/api/posture/camera", json={"on": True}, headers=H)
+    st = await r.json()
+    assert st["camera_on"] and st["service"]["state"] == "browser"
     async with client.ws_connect("/ws") as ws:
         first = await ws.receive_json()
         assert first["type"] == "status"
-        await ws.send_json({"type": "posture", "visible": 1, "score": 88.5, "slump": 0.05, "head_tilt": 2})
+        for _ in range(4):
+            await ws.send_json({"type": "pose", "lm": POSE["lm"], "world": POSE["world"], "aspect": POSE["aspect"]})
         for _ in range(100):
             if app.posture:
                 break
             await asyncio.sleep(0.02)
-    assert app.posture["score"] == 88.5
+    assert 50 < app.posture["score"] <= 100
+    assert any(c["point"] == "spine" for c in app.posture["checks"])
+    await app._slow_tick(2)
+    assert app.metrics["posture_score"] is not None and "state" in app.metrics
+    r = await client.post("/api/posture/calibrate", json={}, headers=H)
+    assert (await r.json())["ok"]
+    r = await client.post("/api/posture/settings", json={"threshold": 70, "mode": "desk"}, headers=H)
+    st = await r.json()
+    assert st["service"]["settings"]["threshold"] == 70 and st["service"]["settings"]["mode"] == "meditation"
+    r = await client.post("/api/posture/camera", json={"on": False}, headers=H)
+    assert not (await r.json())["camera_on"]
 
     r = await client.post("/api/session/stop", json={}, headers=H)
     meta = await r.json()
@@ -130,6 +151,9 @@ async def test_session_flow(client):
     r = await client.get(f"/api/sessions/{sid}")
     d = await r.json()
     assert d["meta"]["rating"] == 4 and any(e["kind"] == "polar_hr" for e in d["events"])
+    assert "timeline" in d and d["posture"]["score"]  # posture.csv recorded while the camera watched
+    r = await client.get("/api/profile")
+    assert (await r.json())["stage"]
     r = await client.get(f"/api/sessions/{sid}/export.csv")
     assert r.status == 200 and "breath_rate" in (await r.text()).splitlines()[0]
     r = await client.get("/api/sessions/nope")

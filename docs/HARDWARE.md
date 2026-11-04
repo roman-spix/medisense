@@ -88,8 +88,8 @@ TinyFrame layout, as in the open-source
 | RX | GPIO **17** (the board's TX for the radar) |
 
 Place it 0.5–1 m in front of you at chest height, aimed at your breastbone,
-with nothing in between and no fan or curtain in its view. The MediSense 2
-firmware finds it by itself at power-up (it tries 115,200 and 1,382,400
+with nothing in between and no fan or curtain in its view. The MediSense
+firmware (version 2 and later) finds it by itself at power-up (it tries 115,200 and 1,382,400
 baud) and forwards everything it says to the app.
 
 *Alternative:* the Seeed **MR60BHA2** radar speaks the same protocol at

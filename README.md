@@ -181,10 +181,18 @@ like, behind your work; just don't close it) and keep the Terminal window
 open or minimised: in the background the browser checks about once a second,
 which is plenty for posture. Chrome works best for this. It sends a macOS
 notification when your posture stays below your threshold (default: below 80
-for 20 seconds, at most every 3 minutes; all adjustable), and draws your day
-as a chart. The first time, allow notifications for Script Editor (System
-Preferences → Notifications). Recalibrate after moving the laptop or the
-chair.
+for 20 seconds, at most every 3 minutes; all adjustable). The first time,
+allow notifications for Script Editor (System Preferences → Notifications).
+Recalibrate after moving the laptop or the chair.
+
+The **Today** card counts your day as you work, updated every 10 seconds:
+time tracked, how much of it you were upright (at or above your reminder
+level), your longest upright stretch, the average score, the reminders sent,
+what pulled you out of line most (slumping, head forward, raised shoulders…)
+and the score through the day; earlier days are in its menu. **Stop
+tracking** switches the camera off and records nothing until you click
+**Start tracking** (opening the app starts tracking). **Pause reminders**
+keeps counting but sends no notifications.
 
 ![MediSense Posture](docs/img/posture.png)
 
@@ -225,11 +233,11 @@ Deleting a session in the app moves it to `~/MediSense/trash`.
 | "The board didn't answer" while setting up | Hold **BOOT** on the board, press and release **RESET**, release **BOOT**, then unplug and replug. |
 | "The WiFi password seems to be wrong" | Type it again in the form shown. Passwords are case-sensitive. |
 | "Can't find that WiFi network" | The board needs 2.4 GHz. If your router names 2.4 and 5 GHz differently, pick the 2.4 GHz name. |
-| "On WiFi but no data reaches this Mac" | Same WiFi on the Mac? macOS firewall: System Preferences → Security & Privacy → Firewall. Allow Python, or turn off "Block all incoming connections". |
+| "On WiFi but no data reaches this Mac" | Look at the **Board** tab. *Board hears* nothing: click **Restart board**, or unplug and replug it (MediSense also updates its firmware then; firmware MediSense 2 had exactly this fault). *Board sends to* not this Mac: MediSense corrects it by itself within a minute. Board sends to this Mac but nothing arrives: the macOS firewall (System Preferences → Security & Privacy → Firewall → Firewall Options…: allow "python3.12", untick "Block all incoming connections"), a VPN on the Mac, or the router's "AP / client isolation". |
 | Signal "Weak" | Move the board closer to the router, away from metal and other electronics. |
 | Breathing shows "--" for long | Sit still. Move the board so your chest is between it and the router. |
 | Camera posture doesn't start | Allow the camera when the browser asks. Safari: Safari → Settings for This Website → Camera. Chrome: also System Preferences → Security & Privacy → Camera → Google Chrome. |
-| A page stays at "Starting…" | Reload it with ⌘R. (Version 0.2.0 could load old cached page code after an update; 0.2.1 can't.) |
+| A page stays at "Starting…" | Reload it with ⌘R. (Version 0.2.0 could load old cached page code after an update; 0.2.1 and later can't.) |
 | No posture notifications | System Preferences → Notifications → **Script Editor** → Allow Notifications. Test it with **Send a test notification** in MediSense Posture. |
 | Data keeps pausing | Plug the board into the Mac during a session: the Board tab's **Interruptions** list then says why (WiFi drop with a reason code, power dip, restart). |
 | macOS asks if "python3.12" may accept incoming connections | Click **Allow**: that's the board's data arriving. |

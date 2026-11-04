@@ -1,4 +1,4 @@
-# Testing MediSense 0.2.1 with your board
+# Testing MediSense 0.2.2 with your board
 
 For the setup you have now: the MacBook, the ESP32-S3 board and the webcam
 (no radar or pulse sensor yet). About 40 minutes, including one sitting.
@@ -24,7 +24,7 @@ For the setup you have now: the MacBook, the ESP32-S3 board and the webcam
 1. In the same downloaded folder, **right-click** `Install MediSense.command`,
    choose **Open**, then **Open** again.
 2. A Terminal window shows the progress for a few minutes, ending with
-   `MediSense 0.2.1 is installed.`
+   `MediSense 0.2.2 is installed.`
 3. Your Desktop now has four icons: **MediSense**, **MediSense Demo**,
    **MediSense Posture** and **MediSense Pro** (Pro is for the radar and the
    pulse sensor; ignore it for now).
@@ -39,12 +39,17 @@ There is no separate installer for the board: MediSense updates it.
 1. Double-click **MediSense** on the Desktop. Your browser opens it.
 2. Plug the board into the Mac with its USB cable.
 3. Within a few seconds the page says *Updating the board to MediSense
-   firmware 0.8.8 + MediSense 2…*. It takes about a minute. Don't unplug it.
+   firmware 0.8.8 + MediSense 3…*. It takes about a minute. Don't unplug it.
    - If macOS asks whether a program may use the "MediSense WiFi" item in
      your keychain, click **Always Allow**.
    - If the page asks for your WiFi password instead, type it once.
 4. When the badge at the top says **Live**, open the **Board** tab. The
-   **Firmware** line should read *RuView 0.8.8 + MediSense 2*.
+   **Firmware** line should read *RuView 0.8.8 + MediSense 3*, **Board hears**
+   shows frames per second, and **Board sends to** ends in *(this Mac)*.
+   - Not live after a minute? The status line on the Board tab now says
+     which side the problem is on (the board hears nothing, or it sends but
+     nothing arrives) and what to do. Send me a screenshot of the Board tab
+     and the **Board log** under it.
 5. On the **Live** tab, the **Signal** card shows frames per second. With the
    new firmware it should be higher and steadier than before (35 or more is
    good).

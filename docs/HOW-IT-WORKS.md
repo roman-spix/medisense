@@ -10,7 +10,7 @@ for ~8 s at a time. Each of those has a fix below.
 ## Data path
 
 ```
- router ──frames to the board──► ESP32-S3 (RuView 0.8.8 + MediSense 2 patch)
+ router ──frames to the board──► ESP32-S3 (RuView 0.8.8 + MediSense 3 patch)
    ▲  self-ping replies + the Mac's 50 Hz pacer │ UDP :5005
    │                                            │  CSI (0xC5110001), radar bytes (0xC511D0A1),
  Mac ── UDP pacer to the board's port 9 ────────┘  pulse samples (0xC511D0B1)
@@ -29,16 +29,26 @@ for ~8 s at a time. Each of those has a fix below.
 
 - RuView `esp32-csi-node` 0.8.8, edge processing off; display, 40 Hz LED and
   WASM compiled out.
-- **MediSense 2 patch** (`firmware/build/patches/0002-…`):
+- **MediSense patch, version 3** (`firmware/build/patches/0002-…`):
   frames are filtered by sender *before* RuView's 50 Hz rate gate (upstream
   gated first, so other devices' frames used up the slots); frames the router
   addresses to the board are preferred (one transmit chain, comparable frame
   to frame; others fill gaps > 0.5 s); byte 19 flags: bit 5 addressed to the
   board, bit 6 invalid first word, bit 7 a 4-byte receive timestamp (µs)
   follows the CSI; the gateway pinger's timeout is twice its interval (a
-  lost reply used to stall the stream for 1 s); management-only promiscuous
-  capture (less radio load); WiFi reconnects forever (upstream gave up after
-  10 failures); radar bytes and pulse samples are forwarded raw.
+  lost reply used to stall the stream for 1 s); WiFi reconnects forever
+  (upstream gave up after 10 failures); radar bytes and pulse samples are
+  forwarded raw. Version 3: RuView's management + data promiscuous capture
+  is kept (version 2 kept management frames only, which on a board without a
+  display starves the CSI engine: the board joined the WiFi and sent
+  nothing); the sender filter gives way after 5 s without frames from the
+  router; and every 10 s the board logs what it heard (`medisense stats:
+  heard= used= to_board= other= foreign= rate_drop= any_sender=`).
+- **Where the data goes:** the board's `target_ip` is this Mac's address on
+  the board's own subnet (read from the network interfaces), not the route to
+  the internet, which leads into the tunnel when a VPN is on. The board logs
+  its target at start-up; if it isn't this Mac, the app rewrites the settings
+  once by itself. The Board tab shows *Board hears* and *Board sends to*.
 - **Pacer:** the app sends a 2-byte UDP packet to the board's port 9 fifty
   times a second while data flows. The router forwards each to the board,
   which makes one more CSI frame, independent of how the router treats pings.

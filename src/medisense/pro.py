@@ -46,6 +46,11 @@ TYPE_HEART = 0x0A15
 TYPE_DISTANCE = 0x0A16
 TYPE_PRESENCE = 0x0F09
 TF_MAX_PAYLOAD = 512
+# Payload sizes of the vital-sign frames (HLK-LD6002 / MR60BHA2). With these, a
+# frame whose header checksum doesn't match the textbook TinyFrame rule is
+# still recognised by type + length + data checksum (one open-source LD6002
+# driver skips the header check entirely).
+TF_EXPECTED_LEN = {TYPE_PHASE: 12, TYPE_BREATH: 4, TYPE_HEART: 4, TYPE_DISTANCE: 8, TYPE_PRESENCE: 1}
 
 
 def tf_checksum(data: bytes) -> int:
@@ -86,11 +91,11 @@ class TinyFrameParser:
             if len(self.buf) < 8:
                 return out
             head = bytes(self.buf[:8])
-            if tf_checksum(head[:7]) != head[7]:
+            _, _, length, ftype = struct.unpack(">BHHH", head[:7])
+            if tf_checksum(head[:7]) != head[7] and TF_EXPECTED_LEN.get(ftype) != length:
                 self.errors += 1
                 del self.buf[:1]
                 continue
-            _, _, length, ftype = struct.unpack(">BHHH", head[:7])
             if length > TF_MAX_PAYLOAD:
                 self.errors += 1
                 del self.buf[:1]
@@ -161,7 +166,10 @@ class RadarState:
 
 # ------------------------------------------------------------- pulse sensor
 
-FINGER_DC = 30000.0  # IR level (18-bit counts at ~7 mA) when a finger covers the sensor
+# Red + IR level (18-bit counts at ~7 mA each) once a finger covers the sensor.
+# The two channels are summed: both carry the pulse in the same direction, the
+# sum is a little cleaner, and some MAX3010x boards swap red and IR.
+FINGER_DC = 50000.0
 
 
 @dataclass
@@ -220,7 +228,8 @@ class PpgProcessor:
 
     def feed_sample(self, t: float, red: float, ir: float) -> None:
         self.samples += 1
-        self._ir_dc = ir if self._ir_dc is None else self._ir_dc + 0.02 * (ir - self._ir_dc)
+        x = red + ir
+        self._ir_dc = x if self._ir_dc is None else self._ir_dc + 0.02 * (x - self._ir_dc)
         finger = self._ir_dc > FINGER_DC
         if finger != self.finger:
             # a finger just landed (or left): restart the filter and beat search
@@ -231,8 +240,8 @@ class PpgProcessor:
         self.finger = finger
         if not finger:
             return
-        # more blood -> more light absorbed -> lower IR reading: invert it
-        y = float(self._bp.step(np.array([-ir]))[0])
+        # more blood -> more light absorbed -> lower reading: invert it
+        y = float(self._bp.step(np.array([-x]))[0])
         self.wave.append((t, y))
         if self._y_prev is None:
             self._y_prev = y

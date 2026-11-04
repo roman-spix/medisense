@@ -93,3 +93,16 @@ async def test_pro_app_fuses_sources(tmp_path, monkeypatch):
     assert d["finger_on"] and d["radar_connected"]
     st = app.status()
     assert st["pro"]["radar"]["connected"] and st["pro"]["pulse"]["finger"]
+
+
+def test_header_checksum_variant_still_parsed():
+    """Some LD6002 firmware may compute the header checksum differently:
+    known type + expected length + valid data checksum is enough."""
+    good = bytearray(tf_frame(0x0A15, struct.pack("<f", 66.0), 9))
+    good[7] ^= 0x5A  # header checksum off
+    p = TinyFrameParser()
+    got = p.feed(bytes(good))
+    assert [t for t, _ in got] == [0x0A15]
+    junk = bytearray(tf_frame(0x0B01, b"\x00" * 20, 9))
+    junk[7] ^= 0x5A  # unknown type with a bad header: rejected
+    assert p.feed(bytes(junk)) == []

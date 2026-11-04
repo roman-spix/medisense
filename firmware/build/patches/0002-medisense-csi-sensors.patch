@@ -490,7 +490,7 @@ index 0000000..5b3c0ef
 +
 +#endif /* MEDISENSE_PPG_H */
 diff --git a/firmware/esp32-csi-node/main/mmwave_sensor.c b/firmware/esp32-csi-node/main/mmwave_sensor.c
-index 747651c..10810c4 100644
+index 747651c..7369e9d 100644
 --- a/firmware/esp32-csi-node/main/mmwave_sensor.c
 +++ b/firmware/esp32-csi-node/main/mmwave_sensor.c
 @@ -27,6 +27,8 @@
@@ -521,16 +521,34 @@ index 747651c..10810c4 100644
  
  /* ======================================================================
   * MR60BHA2 Parser (corrected protocol from Seeed Arduino library)
-@@ -393,7 +399,7 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
+@@ -393,13 +399,24 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
               * 0x0F09) — NOT a bare 0x01 byte. A floating UART1 with no sensor reads
               * noise full of 0x01s, which the old `buf[i] == MR60_SOF` check mistook
               * for a real sensor (false "Detected MR60BHA2", #1107). */
 -            if (buf[i] == MR60_SOF && baud == MMWAVE_MR60_BAUD && i + 7 < len) {
 +            if (buf[i] == MR60_SOF && (baud == MMWAVE_MR60_BAUD || baud == MMWAVE_LD6002_BAUD) && i + 7 < len) {
                  const uint8_t *h = &buf[i];
++                uint16_t type = ((uint16_t)h[5] << 8) | h[6];
                  if (mr60_calc_checksum(h, 7) == h[7]) {
-                     uint16_t type = ((uint16_t)h[5] << 8) | h[6];
-@@ -431,6 +437,14 @@ static mmwave_type_t probe_sensor(void)
+-                    uint16_t type = ((uint16_t)h[5] << 8) | h[6];
+                     if ((type >> 8) == 0x0A || type == 0x0F09) {
+                         mr60_sof_seen++;
+                     }
++                } else if (baud == MMWAVE_LD6002_BAUD) {
++                    /* MediSense: an LD6002 whose header checksum follows another
++                     * rule is still unmistakable by type + exact payload length
++                     * + a valid data checksum. */
++                    uint16_t dlen = ((uint16_t)h[3] << 8) | h[4];
++                    uint16_t want = (type == MR60_TYPE_PHASE) ? 12 : (type == MR60_TYPE_BREATHING || type == MR60_TYPE_HEARTRATE) ? 4
++                                  : (type == MR60_TYPE_DISTANCE) ? 8 : 0;
++                    if (want != 0 && dlen == want && i + 8 + dlen < len &&
++                        mr60_calc_checksum(&h[8], dlen) == h[8 + dlen]) {
++                        mr60_sof_seen++;
++                    }
+                 }
+             }
+             /* LD2410: require a *full validated* report frame, not just the
+@@ -431,6 +448,14 @@ static mmwave_type_t probe_sensor(void)
      mmwave_type_t result = probe_at_baud(MMWAVE_MR60_BAUD);
      if (result != MMWAVE_TYPE_NONE) return result;
  
@@ -545,7 +563,7 @@ index 747651c..10810c4 100644
      ESP_LOGI(TAG, "Probing at %d baud (LD2410)...", MMWAVE_LD2410_BAUD);
      result = probe_at_baud(MMWAVE_LD2410_BAUD);
      return result;
-@@ -444,8 +458,41 @@ static void mmwave_uart_task(void *arg)
+@@ -444,8 +469,41 @@ static void mmwave_uart_task(void *arg)
  
      uint8_t buf[128];
  
@@ -588,7 +606,7 @@ index 747651c..10810c4 100644
          if (len <= 0) {
              vTaskDelay(1);
              continue;
-@@ -517,7 +564,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
+@@ -517,7 +575,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
          .source_clk = UART_SCLK_DEFAULT,
      };
  
@@ -597,7 +615,7 @@ index 747651c..10810c4 100644
      if (err != ESP_OK) {
          ESP_LOGE(TAG, "UART driver install failed: %s", esp_err_to_name(err));
          return err;
-@@ -540,7 +587,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
+@@ -540,7 +598,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
  
      /* Set final baud rate for the detected sensor. */
      uint32_t final_baud = (detected == MMWAVE_TYPE_LD2410)

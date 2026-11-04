@@ -127,7 +127,8 @@ async def test_session_flow(client):
                 break
             await asyncio.sleep(0.02)
     assert 50 < app.posture["score"] <= 100
-    assert any(c["point"] == "spine" for c in app.posture["checks"])
+    assert any(c["point"] == "back" for c in app.posture["checks"])
+    assert [p["key"] for p in app.posture["points"]][:3] == ["legs", "hands", "back"]  # Vairocana, the book's order
     await app._slow_tick(2)
     assert app.metrics["posture_score"] is not None and "state" in app.metrics
     r = await client.post("/api/posture/calibrate", json={}, headers=H)

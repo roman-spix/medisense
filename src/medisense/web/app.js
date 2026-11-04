@@ -530,6 +530,18 @@ $("#end-form").addEventListener("submit", async () => {
 
 let browserCam = null;
 let previewOn = false;
+const POINT_STATUS = {
+  ok: ["✓", "Good"], minor: ["~", "Small adjustment"], major: ["✕", "Out of alignment"],
+  not_visible: ["–", "Not in view"], not_checked: ["–", "Not visible to a camera"],
+  needs_calibration: ["?", "Calibrate to check"], off: ["–", "Not checked"],
+};
+function renderVairocana(points) {
+  $("#v-points").innerHTML = (points || []).map((p, i) => {
+    const [icon, text] = POINT_STATUS[p.status] || POINT_STATUS.not_visible;
+    const tip = p.advice ? `<div class="tip">${esc(p.advice)}</div>` : "";
+    return `<li class="pt pt-${esc(p.status)}"><span class="pt-icon" aria-hidden="true">${icon}</span><div><b>${i + 1}. ${esc(p.name)}</b> <span class="pt-how">${esc(p.how)}</span><div class="pt-status">${esc(text)}</div>${tip}</div></li>`;
+  }).join("");
+}
 const POSTURE_UI = {
   aligned: ["✓", "Aligned"], ok: ["✓", "Good"], drifting: ["!", "Drifting"], away: ["…", "Not in view"],
   waiting: ["…", "Starting the camera…"], calibrating: ["◎", "Calibrating: hold your best posture"],
@@ -553,6 +565,7 @@ function onPosture(p) {
     return;
   }
   if (svc.state === "browser" && !browserCam) startBrowserCam();
+  renderVairocana(p.points);
   $("#posture-val").textContent = p.score == null ? "--" : Math.round(p.score);
   const [icon, label] = POSTURE_UI[p.state] || POSTURE_UI.waiting;
   $("#posture-icon").textContent = icon;

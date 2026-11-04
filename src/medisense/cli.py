@@ -295,7 +295,7 @@ def cmd_doctor(args) -> int:
         try:
             r = subprocess.run([str(py), "-I", str(posture_service.ENGINE), "--check"], capture_output=True, text=True, timeout=60)
             info = json.loads((r.stdout.strip().splitlines() or ["{}"])[-1])
-            line(info.get("type") == "ok", f"posture camera engine: MediaPipe {info.get('mediapipe', '?')}, OpenCV {info.get('opencv', '?')}"
+            line(info.get("type") == "ok", f"posture camera engine: {info.get('engine', '?')}, OpenCV {info.get('opencv', '?')}"
                  if info.get("type") == "ok" else f"posture camera engine: {info.get('message') or r.stderr.strip()[-200:]}")
         except Exception as e:
             line(False, f"posture camera engine: {e}")

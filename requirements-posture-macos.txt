@@ -1,29 +1,34 @@
-# The background posture camera engine (MediSense Posture, and posture during
-# MediSense sessions): exact, hash-checked wheels for macOS (Intel x86_64 on
-# macOS 11+, and Apple silicon). install.sh puts them in their own environment,
-# .venv-posture, with --no-deps: only what the pose landmarker needs at run
-# time (MediaPipe's other dependencies such as jax, matplotlib and
-# opencv-contrib are for features MediSense doesn't use; matplotlib is stubbed
-# in posture_engine.py). MediaPipe 0.10.21 is the newest release with a native
-# Intel-Mac wheel for macOS 11 and NumPy 1.x.
+# The background posture camera engine on macOS (MediSense Posture, and
+# posture during MediSense sessions): exact, hash-checked wheels. install.sh
+# puts them in their own environment, .venv-posture, with --no-deps.
+#
+# The body is found by Apple's Vision framework (built into macOS 11 and
+# later) through PyObjC; OpenCV reads the camera. Every compiled file here was
+# checked to need macOS 11.0 or older (PyObjC: 10.9-11.0, NumPy: 10.9, OpenCV
+# 4.8.1.78: 11.0). MediaPipe is not used on a Mac: every MediaPipe build still
+# on PyPI needs macOS 12.3+ (it imports C++ library functions macOS 11 lacks).
 #
 # Regenerate the hashes from PyPI (https://pypi.org/pypi/<name>/<version>/json),
-# keeping the macOS cp312 / abi3 / py3-none-any wheels.
-mediapipe==0.10.21 \
-    --hash=sha256:a65508f8c0e28a73f519c8a717f95949b9d5b2fb3bf4a632b181cdb71224d62e \
-    --hash=sha256:96bf0dafa9851c74b1f930090193f23c257ccf4bb1bdebbd2ca3a02397011c0e
+# keeping the macOS cp312 / abi3 wheels.
 numpy==1.26.4 \
-    --hash=sha256:b3ce300f3644fb06443ee2222c2201dd3a89ea6040541412b8fa189341847218 \
-    --hash=sha256:03a8c78d01d9781b28a6989f6fa1bb2c4f2d51201cf99d3dd875df6fbd96b23b
-opencv-python-headless==4.9.0.80 \
-    --hash=sha256:2ea8a2edc4db87841991b2fbab55fc07b97ecb602e0f47d5d485bd75cee17c1a \
-    --hash=sha256:e0ee54e27be493e8f7850847edae3128e18b540dac1d7b2e4001b8944e11e1c6
-absl-py==2.5.1 \
-    --hash=sha256:721200f2f0e9960f2ca9dc3a2a706b201f5f75d812c158f059cbbe29eeafbdb8
-attrs==26.1.0 \
-    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
-flatbuffers==25.12.19 \
-    --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
-protobuf==4.25.9 \
-    --hash=sha256:9560813560e6ee72c11ca8873878bdb7ee003c96a57ebb013245fe84e2540904 \
-    --hash=sha256:d49b615e7c935194ac161f0965699ac84df6112c378e05ec53da65d2e4cbb6d4
+    --hash=sha256:03a8c78d01d9781b28a6989f6fa1bb2c4f2d51201cf99d3dd875df6fbd96b23b \
+    --hash=sha256:b3ce300f3644fb06443ee2222c2201dd3a89ea6040541412b8fa189341847218
+opencv-python-headless==4.8.1.78 \
+    --hash=sha256:2c7d45721df9801c4dcd34683a15caa0e30f38b185263fec04a6eb274bc720f0 \
+    --hash=sha256:f3a33f644249f9ce1c913eac580e4b3ef4ce7cab0a71900274708959c2feb5e3
+pyobjc-core==10.3.1 \
+    --hash=sha256:6ff5823d13d0a534cdc17fa4ad47cf5bee4846ce0fd27fc40012e12b46db571b
+pyobjc-framework-Cocoa==10.3.1 \
+    --hash=sha256:11b4e0bad4bbb44a4edda128612f03cdeab38644bbf174de0c13129715497296
+pyobjc-framework-Quartz==10.3.1 \
+    --hash=sha256:ca35f92486869a41847a1703bb176aab8a53dbfd8e678d1f4d68d8e6e1581c71
+pyobjc-framework-CoreML==10.3.1 \
+    --hash=sha256:21c87e84c807b5dbe61e0f016d9aefa32d3212f175cc4b976b5c08770be7a58c \
+    --hash=sha256:4bd3f1acfb3245727727b71cbcf7d21a33d7e00fa488e41ad01527764b969b92 \
+    --hash=sha256:a0877aed5d4cdbb63d1246cd5384c09d78a0667e83c435a1257d10017c11c1a4 \
+    --hash=sha256:c1fdcc0487807afa9cd0f88f25697e0e2e093d0219e8e1aa42aa3674dd78c2cb
+pyobjc-framework-Vision==10.3.1 \
+    --hash=sha256:2473b346a112c51ac485184305bd13c402e0db45f2df3d277315bd49efba18e9 \
+    --hash=sha256:32626183c51674efb3b5738e2884c3fea37edca010117cf71bd72cb3c49c869a \
+    --hash=sha256:4302e2c5f68c9667ecd4273809cbc4611af6368b123d69596e5b088f1b1aa16b \
+    --hash=sha256:dff3582678930461a0bb11bf070854d49f6944a851dc89edc63fac93c75ddf39

@@ -28,21 +28,11 @@ $("#theme").addEventListener("click", () => {
   store.set("theme", dark ? "light" : "dark"); applyTheme(dark ? "light" : "dark");
 });
 
-const POINTS = [
-  ["spine", "Spine straight, like an arrow"],
-  ["shoulders", "Shoulders level and open"],
-  ["head", "Neck slightly bent, chin a little tucked"],
-  ["hands", "Hands in the meditation mudra"],
-  ["legs", "Legs crossed, knees low"],
-  ["eyes", "Gaze resting down past the nose"],
-  ["mouth", "Jaw relaxed, tongue to the palate"],
-];
 const STATUS = {
   ok: ["✓", "Good"], minor: ["~", "Small adjustment"], major: ["✕", "Out of alignment"],
-  not_visible: ["–", "Not in view"], not_checked: ["–", "Not checked by the camera"],
-  needs_calibration: ["?", "Calibrate to check"], off: ["–", "Not checked in desk mode"],
+  not_visible: ["–", "Not in view"], not_checked: ["–", "Not visible to a camera"],
+  needs_calibration: ["?", "Calibrate to check"], off: ["–", "Not checked"],
 };
-const RANK = { major: 5, minor: 4, needs_calibration: 3, ok: 2, not_visible: 1, not_checked: 0, off: 0 };
 const STATE_UI = {
   aligned: ["✓", "Aligned"], ok: ["✓", "Good"], drifting: ["!", "Drifting"], away: ["…", "Away"],
   waiting: ["…", "Waiting for the camera"], calibrating: ["◎", "Calibrating: hold your best posture"],
@@ -60,17 +50,11 @@ applyTheme(store.get("theme", null));
 
 function setPill(kind, text) { $("#pill").className = `pill ${kind}`; $("#pill-text").textContent = text; }
 
-function renderPoints(checks) {
-  const byPoint = {};
-  for (const c of checks || []) {
-    const cur = byPoint[c.point];
-    if (!cur || RANK[c.status] > RANK[cur.status]) byPoint[c.point] = c;
-  }
-  $("#points").innerHTML = POINTS.map(([key, label]) => {
-    const c = byPoint[key];
-    const [icon, text] = STATUS[c ? c.status : "not_visible"] || STATUS.not_visible;
-    const tip = c && c.penalty > 0 && c.advice ? `<div class="tip">${esc(c.advice)}</div>` : "";
-    return `<li class="pt pt-${c ? c.status : "not_visible"}"><span class="pt-icon" aria-hidden="true">${icon}</span><div><b>${esc(label)}</b><div class="pt-status">${esc(text)}</div>${tip}</div></li>`;
+function renderPoints(points) {
+  $("#points").innerHTML = (points || []).map((p) => {
+    const [icon, text] = STATUS[p.status] || STATUS.not_visible;
+    const tip = p.advice ? `<div class="tip">${esc(p.advice)}</div>` : "";
+    return `<li class="pt pt-${esc(p.status)}"><span class="pt-icon" aria-hidden="true">${icon}</span><div><b>${esc(p.name)}</b><div class="pt-status">${esc(text)} · <span class="pt-how">${esc(p.how)}</span></div>${tip}</div></li>`;
   }).join("");
 }
 
@@ -85,10 +69,10 @@ function onPosture(m) {
   $("#state-icon").textContent = icon;
   $("#state").textContent = label;
   $("#advice").innerHTML = (m.advice || []).map((a) => `<li>${esc(a)}</li>`).join("");
-  renderPoints(m.checks);
+  renderPoints(m.points);
   $("#calib-note").textContent = m.calibrated
-    ? "Calibrated. Recalibrate whenever you move the laptop or change how you sit."
-    : "Sit in your best Vairocana posture, then click Calibrate. Until then only the level checks run.";
+    ? "Calibrated. Recalibrate whenever you move the laptop or the chair."
+    : "Sit well at your desk (tall, shoulders relaxed, head over your shoulders, hands on the keyboard), then click Calibrate. Until then only the level checks run.";
   if (m.lm) drawSkeleton($("#pose"), m.lm);
   // camera / engine state
   const note = $("#cam-note");
@@ -119,7 +103,6 @@ function connect() {
 connect();
 
 // ------------------------------------------------------------- controls
-$$("#modes .chip").forEach((b) => b.addEventListener("click", () => saveSettings({ mode: b.dataset.mode })));
 $("#calibrate").addEventListener("click", async () => {
   await api("/api/calibrate", "POST", {});
   $("#calib-note").textContent = "Calibrating for 5 seconds: hold your best posture…";
@@ -155,7 +138,6 @@ function applySettings(s) {
   $("#hold").value = s.hold_s; $("#v-hold").textContent = `${Math.round(s.hold_s)} s`;
   $("#cooldown").value = Math.round(s.cooldown_s / 60); $("#v-cooldown").textContent = `${Math.round(s.cooldown_s / 60)} min`;
   $("#enabled").checked = s.enabled; $("#sound").checked = s.sound;
-  $$("#modes .chip").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
 }
 async function saveSettings(patch) {
   const r = await api("/api/settings", "POST", patch).catch((e) => { alert(e.message); return null; });

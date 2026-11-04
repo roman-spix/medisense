@@ -66,6 +66,7 @@ const S = {
 };
 
 const wave = new WaveChart($("#wave"), 60);
+const pulseWave = new WaveChart($("#pulse-wave"), 8);
 const CHART_OPTS = {
   breath: { floor: 0, minSpan: 6 },
   heart: { floor: 30, minSpan: 16 },
@@ -87,6 +88,7 @@ const progress = {
 
 function redrawAll() {
   wave.draw();
+  pulseWave.draw();
   Object.values(charts).forEach((c) => c.draw());
   Object.values(progress).forEach((c) => c.draw());
   drawSpark();
@@ -158,6 +160,7 @@ function connect() {
     else if (m.type === "wave") wave.push(m.samples);
     else if (m.type === "event") onEvent(m);
     else if (m.type === "posture") onPosture(m);
+    else if (m.type === "ppg") { if (m.samples && m.samples.length) pulseWave.push(m.samples); }
     else if (m.type === "preview") { if (previewOn) $("#pose-img").src = `data:image/jpeg;base64,${m.jpg}`; }
   };
   ws.onopen = () => { if (previewOn) sendWs({ type: "preview", on: true }); };
@@ -206,6 +209,12 @@ function onStatus(st) {
   else setPill(...(DEVICE_PILL[dev.state] || ["warn", dev.state || "…"]));
   renderSetup(st);
   renderBoard(st);
+  const pro = st.pro;
+  $("#card-rhythm").hidden = !pro;
+  if (pro) {
+    $("#radar-state").textContent = pro.radar.connected ? "connected" : "not found";
+    $("#pulse-state").textContent = !pro.pulse.connected ? "not found" : pro.pulse.finger ? "finger on" : "no finger";
+  }
   const evs = st.board_events || [];
   $("#board-events").innerHTML = evs.length
     ? evs.slice().reverse().map((e) => `<li><span class="t">${fmtClock(e.t)}</span><span>${esc(e.text)}</span></li>`).join("")
@@ -227,6 +236,7 @@ function onMetrics(m) {
   else if (m.signal === "paused") note = "Signal paused: the board is reconnecting";
   else if (m.motion_state === "moving" || m.motion_state === "restless") note = "Paused while you move";
   else if (br == null) note = S.hadBreath ? "Measuring again after you moved (about 25 s)" : "Measuring: sit still (the first reading takes about 40 s)";
+  if (br != null && m.breath_source && m.breath_source !== "wifi") note = `From the ${m.breath_source === "radar" ? "radar" : "pulse sensor"}`;
   if (br != null) S.hadBreath = true;
   $("#breath-note").textContent = note;
 
@@ -238,7 +248,18 @@ function onMetrics(m) {
   $("#heart-exp").textContent = S.heartExp ? (exp == null ? "WiFi estimate: --" : `WiFi estimate ~${Math.round(exp)} (often wrong)`) : "";
   $("#heart-exp-btn").textContent = S.heartExp ? "Hide WiFi estimate" : "Show WiFi estimate";
   $("#heart-exp-btn").setAttribute("aria-pressed", String(S.heartExp));
-  if (trusted != null) $("#heart-note").textContent = m.hrv_rmssd != null ? `Heart rate variability (RMSSD): ${Math.round(m.hrv_rmssd)} ms.` : "From the pulse sensor.";
+  if (trusted != null) $("#heart-note").textContent = m.sensor_hr_source === "radar"
+    ? "From the radar (put a finger on the pulse sensor for beat-to-beat accuracy)."
+    : m.hrv_rmssd != null ? `From the pulse sensor. Heart rate variability (RMSSD): ${Math.round(m.hrv_rmssd)} ms.` : "From the pulse sensor.";
+  if (S.status && S.status.pro) {
+    $("#hrv-rmssd").textContent = m.hrv_rmssd == null ? "--" : `${Math.round(m.hrv_rmssd)} ms`;
+    $("#hrv-sdnn").textContent = m.hrv_sdnn == null ? "--" : `${Math.round(m.hrv_sdnn)} ms`;
+    $("#hrv-coh").textContent = m.coherence == null ? "--" : `${Math.round(m.coherence * 100)}%`;
+    $("#breath-src").textContent = { radar: "radar", wifi: "WiFi", pulse: "pulse rhythm" }[m.breath_source] || "--";
+    $("#pulse-note").textContent = m.finger_on
+      ? (m.hrv_rmssd == null ? "Pulse found. Variability appears after about a minute of steady beats." : `Beats clean: ${Math.round((m.pulse_quality || 0) * 100)}% of the last minute.`)
+      : "Rest a fingertip (or clip the sensor to an earlobe) lightly on the pulse sensor.";
+  }
 
   // Practice state
   const st = m.state ?? "";
@@ -687,7 +708,7 @@ function renderBoard(st) {
     ["USB port", d.port ? `${d.port} (${d.port_label})` : "not connected"],
     ["Chip", d.chip ? `${d.chip}${d.flash_size ? ", " + d.flash_size + " flash" : ""}` : "--"],
     ["MAC address", d.mac || "--"],
-    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}` : "--"],
+    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}${d.firmware_label && d.firmware_label.includes("MediSense") ? " + MediSense 2" : ""}` : "--"],
     ["Board address", d.board_ip || "--"],
     ["This Mac", st.mac_ip || "--"],
     ["WiFi network", cfg.ssid || "--"],

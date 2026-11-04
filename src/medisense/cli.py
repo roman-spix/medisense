@@ -93,14 +93,19 @@ async def _serve(args) -> int:
     from .app import MediSenseApp
     from .server import build
 
-    app = MediSenseApp(demo=args.demo, udp_port=args.udp_port)
+    if getattr(args, "pro", False):
+        from .pro import ProApp
+
+        app = ProApp(demo=args.demo, udp_port=args.udp_port)
+    else:
+        app = MediSenseApp(demo=args.demo, udp_port=args.udp_port)
     await app.start()
     runner = web.AppRunner(build(app), access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", args.port)
     await site.start()
     url = f"http://localhost:{args.port}/"
-    print(f"MediSense {__version__} is running: {url}")
+    print(f"MediSense{' Pro' if app.pro else ''} {__version__} is running: {url}")
     print(f"Recordings: {data_dir() / 'sessions'}")
     print("Keep this window open while you use MediSense. Press Ctrl+C (or close it) to quit.\n", flush=True)
     if not args.no_browser:
@@ -130,7 +135,7 @@ def cmd_start(args) -> int:
             webbrowser.open(f"http://localhost:{args.port}/")
         return 0
     if not _port_free(args.port):
-        print(f"Port {args.port} is used by another program. Try: medisense start --port 8766")
+        print(f"Port {args.port} is used by another program. Try: medisense start --port 8767")
         return 1
     if not _port_free(args.udp_port, socket.SOCK_DGRAM, "0.0.0.0"):
         print(f"UDP port {args.udp_port} (board data) is used by another program. Close it and try again.")
@@ -382,10 +387,14 @@ def main(argv=None) -> None:
         p.add_argument("--no-browser", action="store_true", help="don't open the browser")
         p.add_argument("--quiet", action="store_true", help="no live line in the terminal")
         p.add_argument("--verbose", action="store_true", help="detailed log in ~/MediSense/medisense.log")
-        p.set_defaults(func=cmd_start, demo=demo)
+        p.set_defaults(func=cmd_start, demo=demo, pro=False)
 
     add_start(sub.add_parser("start", help="run MediSense (default)"), demo=False)
     add_start(sub.add_parser("demo", help="run with a simulated meditator, no board needed"), demo=True)
+    pro = sub.add_parser("pro", help="MediSense Pro: the board plus a 60 GHz radar and a pulse sensor")
+    add_start(pro, demo=False)
+    pro.add_argument("--demo", action="store_true", help="simulated board, radar and pulse sensor")
+    pro.set_defaults(pro=True)
     pp = sub.add_parser("posture", help="MediSense Posture: posture reminders in the background")
     pp.add_argument("--port", type=int, default=0, help="page port (default 8766)")
     pp.add_argument("--no-browser", action="store_true")

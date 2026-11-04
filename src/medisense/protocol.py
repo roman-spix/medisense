@@ -212,7 +212,7 @@ class PpgBatch:
     node_id: int
     sensor_type: int  # 1 = MAX3010x
     seq: int
-    dev_ts_us: int  # time of the first sample
+    dev_ts_us: int  # board time of the last sample in the batch (us)
     rate_hz: int
     overflow: bool
     red: np.ndarray

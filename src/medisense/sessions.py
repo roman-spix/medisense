@@ -16,7 +16,8 @@ from .config import data_dir, sessions_dir
 SUMMARY_VERSION = 2  # bump when the summary gains or changes numbers: old sessions are re-summarised
 
 
-STRING_FIELDS = {"signal", "motion_state", "presence", "frame_class", "posture_faults", "state", "sensor_hr_source"}
+STRING_FIELDS = {"signal", "motion_state", "presence", "frame_class", "posture_faults", "state", "sensor_hr_source",
+                 "breath_source"}
 
 
 def _f(v) -> float | None:

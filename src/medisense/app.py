@@ -44,6 +44,7 @@ BOARD_EVENTS = [
     (re.compile(r"rst:0x[0-9a-f]+ \(([A-Z_]+)"), "Board restarted ({0})."),
     (re.compile(r"WiFi disconnected, reason=(\d+)"), "Board lost the WiFi connection (reason {0})."),
     (re.compile(r"Got IP: (\S+)"), "Board (re)joined the WiFi at {0}."),
+    (re.compile(r"sendto ENOMEM"), "The board ran out of network buffers and paused sending for a moment (busy WiFi)."),
 ]
 
 
@@ -56,6 +57,8 @@ class _Udp(asyncio.DatagramProtocol):
 
 
 class MediSenseApp:
+    pro = False  # MediSense Pro (radar + pulse sensor) overrides the sensor hooks
+
     def __init__(self, demo: bool = False, udp_port: int = UDP_PORT):
         self.demo = demo
         self.udp_port = udp_port
@@ -145,6 +148,9 @@ class MediSenseApp:
     def on_other_packet(self, kind: int | None, data: bytes, now: float) -> None:
         """Sensor packets (radar, pulse sensor): handled by MediSense Pro."""
 
+    def extra_metrics(self, now: float, d: dict) -> None:
+        """Add or replace numbers in the per-second metrics (MediSense Pro)."""
+
     async def _pacer(self) -> None:
         """Send tiny packets to the board so the router transmits frames to it.
 
@@ -233,6 +239,7 @@ class MediSenseApp:
             return
         d = m.as_dict()
         d.update(self._posture_fields(now))
+        self.extra_metrics(now, d)
         rel = self._rel(now)
         d["state"] = self.practice.step(rel, d)
         d.update({k: v for k, v in self.practice.live(rel).items() if k != "state"})
@@ -408,6 +415,7 @@ class MediSenseApp:
         return {
             "version": __version__,
             "demo": self.demo,
+            "pro": None,
             "live": live,
             "paused": paused,
             "packet_source": self.packet_source,

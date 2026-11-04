@@ -36,6 +36,7 @@ METRIC_FIELDS = [
     "gap_s", "data_quality", "frame_class",
     "posture_score", "slump", "head_tilt", "shoulder_tilt", "lean", "posture_faults",
     "state", "sensor_hr", "sensor_hr_source", "sensor_br", "hrv_rmssd", "coherence",
+    "breath_rate_wifi", "breath_source", "hrv_sdnn", "pulse_quality",
 ]
 POSTURE_FIELDS = [  # one row per 0.5 s while the camera sees you: the score and each check's measurement
     "t", "score", "state", "faults", "head_drop", "chin", "head_forward", "head_level", "face_forward",

@@ -458,6 +458,7 @@ class DeviceManager:
             "board_ip": self.log.board_ip,
             "board_wifi": self.log.wifi,
             "board_firmware": self.log.firmware_version,
+            "firmware_label": reg.get("firmware_version") if reg else None,  # what MediSense installed
             "csi_callbacks": self.log.csi_callbacks,
             "configured": reg.get("settings") if reg else None,
             "suggested_ssid": self.suggested_ssid,
@@ -604,6 +605,19 @@ class DeviceManager:
                 return
             self._start_monitor(reset=True)
             self._set("starting", "Board ready. Waiting for it to join the WiFi…")
+            return
+        if reg and reg.get("settings", {}).get("ssid"):
+            # A board set up earlier, with older firmware: update it in place
+            # (same WiFi settings) when the password is in the Keychain.
+            ssid = reg["settings"]["ssid"]
+            password = await asyncio.to_thread(load_wifi_password, ssid)
+            if password is not None:
+                want_ip = await asyncio.to_thread(network.local_ip) or reg["settings"]["target_ip"]
+                settings = firmware.BoardSettings(**{**reg["settings"], "password": password, "target_ip": want_ip})
+                self._set("flashing", f"Updating the board to MediSense firmware {image.version}…", 0)
+                await self._provision(settings, full=True)
+                return
+            self._set("needs_setup", "A firmware update is ready for this board. Enter your WiFi password once to install it.")
             return
         self._set("needs_setup", "New board. Set it up once: MediSense installs its firmware and your WiFi details.")
 

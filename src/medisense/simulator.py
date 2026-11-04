@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import math
 import socket
+import struct
 import time
 from dataclasses import dataclass, field
 
@@ -285,6 +286,115 @@ async def run_udp(host: str, port: int, scenario: Scenario | None = None, stop: 
                 await asyncio.sleep(delay)
             pkt = body.frame(ts)
             if pkt is not None:
+                try:
+                    sock.sendto(pkt, (host, port))
+                except OSError:
+                    pass
+    finally:
+        sock.close()
+
+
+# ------------------------------------------------------- Pro sensors (demo)
+
+def ppg_shape(p: float) -> float:
+    """Blood volume through one heartbeat: a systolic wave, then the dicrotic one."""
+    p %= 1.0
+    return math.exp(-((p - 0.22) / 0.07) ** 2) + 0.35 * math.exp(-((p - 0.52) / 0.09) ** 2)
+
+
+class SensorSim:
+    """A pretend 60 GHz radar and fingertip pulse sensor on the same body.
+
+    Produces the packets the v2 firmware sends: raw TinyFrame bytes from the
+    radar (rates once a second, phases 20x a second) and red/IR batches from
+    the pulse sensor (100 Hz, 5 samples per packet). The heartbeat follows the
+    body's heart rate including the breathing rhythm in it (RSA), so heart-
+    rate variability and coherence come out as they would from a person.
+    """
+
+    def __init__(self, scenario: Scenario | None = None, finger_on=(10.0, 1e9), seed: int = 7):
+        self.sc = scenario or Scenario()
+        self.body = SyntheticBody(self.sc)
+        self.rng = np.random.default_rng(seed)
+        self.finger_on = finger_on
+        self.t = 0.0
+        self.seq_ppg = 0
+        self.seq_radar = 0
+        self._radar_buf = bytearray()
+        self._next_rates = 1.0
+        self._next_phase = 0.0
+        self._fid = 0
+        self._ppg: list[tuple[int, int]] = []
+
+    def _advance(self, t: float) -> None:
+        dt = max(0.0, t - self.body._last_t)
+        self.body._last_t = t
+        self.body.breath_phase += self.sc.breath_bpm(t) / 60.0 * dt
+        self.body.heart_phase += self.body.heart_bpm(t) / 60.0 * dt
+
+    def _tf(self, ftype: int, payload: bytes) -> bytes:
+        from .pro import tf_frame
+
+        self._fid += 1
+        return tf_frame(ftype, payload, self._fid)
+
+    def step(self, t: float) -> list[bytes]:
+        """Advance to time t (call every 10 ms); returns packets due now."""
+        from .protocol import build_ppg, build_radar
+
+        out = []
+        self._advance(t)
+        self.t = t
+        # pulse sensor: one sample now; a packet every 5 samples
+        on = self.finger_on[0] <= t < self.finger_on[1] and self.sc.present(t)
+        ir_dc, red_dc = (82000.0, 61000.0) if on else (1200.0, 900.0)
+        wander = 140.0 * breath_shape(self.body.breath_phase)
+        pulse = ppg_shape(self.body.heart_phase) if on else 0.0
+        move = 1500.0 * self.rng.normal() if (on and self.sc.moving(t)) else 0.0
+        ir = ir_dc - 650.0 * pulse - wander + move + self.rng.normal(0, 18)
+        red = red_dc - 420.0 * pulse - 0.7 * wander + move + self.rng.normal(0, 18)
+        self._ppg.append((max(0, int(red)), max(0, int(ir))))
+        if len(self._ppg) == 5:
+            r, i = zip(*self._ppg)
+            out.append(build_ppg(list(r), list(i), self.seq_ppg, int(t * 1e6)))
+            self.seq_ppg += 1
+            self._ppg = []
+        # radar
+        if self.sc.present(t) and t >= self._next_phase:
+            self._next_phase = t + 0.05
+            br_ph = breath_shape(self.body.breath_phase) - 0.5
+            hr_ph = 0.1 * heart_shape(self.body.heart_phase)
+            self._radar_buf += self._tf(0x0A13, struct.pack("<fff", br_ph + hr_ph, br_ph, hr_ph))
+        if t >= self._next_rates:
+            self._next_rates = t + 1.0
+            present = self.sc.present(t)
+            self._radar_buf += self._tf(0x0F09, bytes([1 if present else 0]))
+            if present and not self.sc.moving(t):
+                self._radar_buf += self._tf(0x0A14, struct.pack("<f", self.sc.breath_bpm(t) + self.rng.normal(0, 0.2)))
+                self._radar_buf += self._tf(0x0A15, struct.pack("<f", self.sc.heart_bpm + self.rng.normal(0, 1.2)))
+                self._radar_buf += self._tf(0x0A16, struct.pack("<If", 1, 0.9))
+        if len(self._radar_buf) >= 200 or (self._radar_buf and abs((t * 10) - round(t * 10)) < 1e-6):
+            out.append(build_radar(bytes(self._radar_buf), self.seq_radar, int(t * 1e6)))
+            self.seq_radar += 1
+            self._radar_buf.clear()
+        return out
+
+
+async def run_sensors_udp(host: str, port: int, scenario: Scenario | None = None,
+                          stop: asyncio.Event | None = None) -> None:
+    """MediSense Pro demo: send simulated radar and pulse packets in real time."""
+    sim = SensorSim(scenario)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    t0 = time.monotonic()
+    k = 0
+    try:
+        while stop is None or not stop.is_set():
+            k += 1
+            t = k * 0.01
+            delay = t0 + t - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            for pkt in sim.step(round(t, 2)):
                 try:
                     sock.sendto(pkt, (host, port))
                 except OSError:

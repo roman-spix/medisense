@@ -353,6 +353,7 @@ export class BarChart {
     const vals = this.items.map((d) => d.value).filter((v) => v != null);
     const max = Math.max(o.yMax ?? 0, ...vals, 1);
     const ticks = niceTicks(0, max, 3);
+    if (ticks.length >= 2 && ticks[ticks.length - 1] < max) ticks.push(+(ticks[ticks.length - 1] + ticks[1] - ticks[0]).toFixed(10));
     const top = ticks[ticks.length - 1] || max;
     const Y = (v) => o.padTop + (1 - v / top) * (h - o.padTop - o.padBottom);
     ctx.font = "11px system-ui, -apple-system, sans-serif";

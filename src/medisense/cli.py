@@ -144,6 +144,81 @@ def cmd_start(args) -> int:
         return 0
 
 
+async def _serve_posture(args) -> int:
+    from aiohttp import web
+
+    from .posture_app import PostureApp, build
+
+    app = PostureApp()
+    await app.start()
+    runner = web.AppRunner(build(app), access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", args.port).start()
+    url = f"http://localhost:{args.port}/"
+    print(f"MediSense Posture is running: {url}")
+    print("It watches your posture with the camera and sends a macOS notification when it drifts.")
+    print("Keep this window open (you can minimise it). Press Ctrl+C or close it to quit.\n", flush=True)
+    if not args.no_browser:
+        webbrowser.open(url)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGHUP", signal.SIGTERM)):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+    async def line() -> None:
+        tty = sys.stdout.isatty()
+        while True:
+            await asyncio.sleep(2.0)
+            cur = app.tracker.current
+            sc = cur.get("score")
+            svc = app.service.snapshot()
+            text = (f"[{(svc['state'] or '').upper()}] posture {sc:.0f}/100 {cur.get('state', '')}" if sc is not None
+                    else f"[{(svc['state'] or '').upper()}] {cur.get('state', 'waiting')}")
+            if svc.get("error"):
+                text += f"  {svc['error']}"
+            text += f"  reminders sent: {app.tracker.alerts}"
+            if tty and not args.quiet:
+                sys.stdout.write("\r\033[K" + text[:150])
+                sys.stdout.flush()
+
+    view = asyncio.create_task(line())
+    await stop.wait()
+    print("\nStopping…")
+    view.cancel()
+    await app.stop()
+    await runner.cleanup()
+    return 0
+
+
+def cmd_posture(args) -> int:
+    from .posture_app import POSTURE_PORT
+
+    port = args.port or POSTURE_PORT
+    args.port = port
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1) as r:
+            if b'"service"' in r.read():
+                print(f"MediSense Posture is already running. Opening http://localhost:{port}/")
+                if not args.no_browser:
+                    webbrowser.open(f"http://localhost:{port}/")
+                return 0
+    except Exception:
+        pass
+    if not _port_free(port):
+        print(f"Port {port} is used by another program. Try: medisense posture --port 8768")
+        return 1
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+                        filename=str(data_dir() / "posture.log"))
+    try:
+        return asyncio.run(_serve_posture(args))
+    except KeyboardInterrupt:
+        return 0
+
+
 def cmd_doctor(args) -> int:
     """Check everything that can be checked without the board."""
     from . import firmware, network
@@ -286,6 +361,12 @@ def main(argv=None) -> None:
 
     add_start(sub.add_parser("start", help="run MediSense (default)"), demo=False)
     add_start(sub.add_parser("demo", help="run with a simulated meditator, no board needed"), demo=True)
+    pp = sub.add_parser("posture", help="MediSense Posture: posture reminders in the background")
+    pp.add_argument("--port", type=int, default=0, help="page port (default 8766)")
+    pp.add_argument("--no-browser", action="store_true")
+    pp.add_argument("--quiet", action="store_true")
+    pp.add_argument("--verbose", action="store_true")
+    pp.set_defaults(func=cmd_posture)
     sub.add_parser("doctor", help="check the installation").set_defaults(func=cmd_doctor)
     sub.add_parser("sessions", help="list recorded sessions").set_defaults(func=cmd_sessions)
     rp = sub.add_parser("reprocess", help="re-analyse a session's raw capture")

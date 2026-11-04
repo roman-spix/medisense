@@ -1,117 +1,273 @@
 """A pretend board: produces CSI packets like the real firmware would.
 
-Used by demo mode (try the whole app before the hardware arrives) and by the
+Used by demo mode (try the app before the hardware arrives) and by the
 tests (check that the analysis recovers known breathing and heart rates).
 
-The model is deliberately unkind: irregular frame timing, automatic gain jumps,
-beacons mixed with data frames, int8 quantisation, sensor noise, and a few
-posture shifts.
+The model is physical rather than cosmetic, because the first real-world
+test showed how kind a cosmetic model is:
+
+* the channel is a sum of propagation paths (router → board directly, a few
+  wall reflections, and one path that bounces off the chest); breathing and
+  the heartbeat change the chest path's length by millimetres, so every
+  subcarrier's amplitude *and* phase moves differently, sometimes
+  non-linearly;
+* breathing is shaped like real slow breathing (inhale, longer exhale, a
+  pause), which puts strong harmonics at 2x and 3x the true rate;
+* frames arrive irregularly; with the original firmware every lost ping
+  reply stalls the stream for a full second; there are longer outages;
+* beacons (a different transmit chain, lower quality) are mixed with the
+  ping replies; the original firmware also lets through router frames meant
+  for other devices;
+* the radio adds automatic gain jumps, a random phase per frame, a timing
+  slope across subcarriers, noise and 8-bit quantisation;
+* the person shifts position now and then, and can get up and leave.
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
-import random
 import socket
 import time
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from .protocol import build_csi
+from .protocol import FLAG_TO_ME, HTLTF_INDEX, LLTF_INDEX, build_csi
 
-N_SUB = 64
-# LLTF ordering used by ESP-IDF: subcarriers 0..31 then -32..-1. DC (index 0)
-# and the guard band (27..37 in this ordering) carry nothing.
-NULL_SUBCARRIERS = [0] + list(range(27, 38))
+C = 3e8
+FC = 2.437e9  # channel 6
+DF = 312.5e3
 
 
 @dataclass
 class Scenario:
-    """What the pretend meditator does. Rates can drift over the session."""
+    """What the pretend meditator (and the radio) does."""
 
     breath_start_bpm: float = 13.0
-    breath_end_bpm: float = 6.5
+    breath_end_bpm: float = 6.0
     ramp_s: float = 600.0
-    heart_bpm: float = 64.0
-    breath_depth: float = 0.035  # relative amplitude modulation
-    heart_depth: float = 0.004
-    noise: float = 0.02
-    frame_rate: float = 34.0
+    heart_bpm: float = 66.0
+    hrv_bpm: float = 3.0  # respiratory sinus arrhythmia amplitude
+    breath_mm: float = 5.0  # chest displacement (peak)
+    heart_mm: float = 0.25
+    body_gain: float = 0.35  # strength of the chest reflection vs the direct path
+    snr_db: float = 24.0
+    frame_rate: float = 45.0  # frames/s offered by the radio
+    firmware: str = "new"  # "new" (MediSense patches) or "old" (RuView 0.8.8)
+    loss: float = 0.03  # lost ping replies (old firmware: each stalls ~1 s)
+    beacon_share: float = 0.15
+    foreign_share: float = 0.10  # old firmware only: router frames meant for others
+    outages: list[tuple[float, float]] = field(default_factory=list)  # (start, length)
     shifts_at: list[float] = field(default_factory=lambda: [95.0, 400.0, 760.0])
     shift_len_s: float = 2.5
-    loss: float = 0.02
+    away: list[tuple[float, float]] = field(default_factory=list)  # (start, length) out of the seat
     seed: int = 7
 
     def breath_bpm(self, t: float) -> float:
-        a = min(1.0, max(0.0, t / self.ramp_s))
+        a = min(1.0, max(0.0, t / self.ramp_s)) if self.ramp_s > 0 else 1.0
         return self.breath_start_bpm + (self.breath_end_bpm - self.breath_start_bpm) * a
+
+    def moving(self, t: float) -> bool:
+        return any(s <= t < s + self.shift_len_s for s in self.shifts_at) or \
+            any(s <= t < s + 2.0 or s + d - 2.0 <= t < s + d for s, d in self.away)
+
+    def present(self, t: float) -> bool:
+        return not any(s + 2.0 <= t < s + d - 2.0 for s, d in self.away)
+
+    def outage(self, t: float) -> bool:
+        return any(s <= t < s + d for s, d in self.outages)
+
+
+def _smoothstep(x):
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3 - 2 * x)
+
+
+def breath_shape(phase: float) -> float:
+    """0..1 chest position over one breath: inhale 35 %, exhale 45 %, pause 20 %."""
+    p = phase % 1.0
+    if p < 0.35:
+        return float(_smoothstep(p / 0.35))
+    if p < 0.80:
+        return float(1.0 - _smoothstep((p - 0.35) / 0.45))
+    return 0.0
+
+
+def heart_shape(phase: float) -> float:
+    """Sharp systolic push followed by a smaller rebound."""
+    p = phase % 1.0
+    return math.exp(-((p - 0.15) / 0.06) ** 2) + 0.35 * math.exp(-((p - 0.45) / 0.10) ** 2)
 
 
 class SyntheticBody:
     def __init__(self, scenario: Scenario | None = None):
         self.sc = scenario or Scenario()
-        self.rng = np.random.default_rng(self.sc.seed)
-        r = self.rng
-        base = 18 + 10 * np.abs(np.sin(np.linspace(0, 3 * math.pi, N_SUB) + r.uniform(0, math.pi)))
-        base[NULL_SUBCARRIERS] = 0.3
-        self.base = base
-        self.breath_gain = r.normal(0, 1, N_SUB)
-        self.heart_gain = r.normal(0, 1, N_SUB)
-        self.phase = r.uniform(0, 2 * math.pi, N_SUB)
-        self.posture = np.zeros(N_SUB)  # static change after a shift
+        r = self.rng = np.random.default_rng(self.sc.seed)
+        k = np.arange(-32, 32)
+        self.freqs = FC + k * DF  # all 64 subcarrier frequencies, index = k + 32
+        # Static paths: direct + 4 reflections (delays in metres of extra path)
+        self.static_len = np.array([3.0, 4.6, 6.1, 7.9, 10.4]) + r.uniform(0, 0.5, 5)
+        self.static_amp = np.array([1.0, 0.55, 0.4, 0.3, 0.2]) * r.uniform(0.8, 1.2, 5)
+        self.static_phase = r.uniform(0, 2 * np.pi, 5)
+        self.body_len0 = 4.2 + r.uniform(0, 0.4)
+        self.body_phase = r.uniform(0, 2 * np.pi)
+        self.body_amp = self.sc.body_gain
+        # Beacons use a different transmit chain: a fixed smooth complex response.
+        self.beacon_resp = (1 + 0.25 * np.cos(np.linspace(0, 2 * np.pi, 64) + r.uniform(0, 6))) * \
+            np.exp(1j * 0.6 * np.sin(np.linspace(0, np.pi, 64) + r.uniform(0, 6)))
+        # Frames to other devices are beamformed: another response, drifting.
+        self.foreign_resp = np.exp(1j * r.uniform(-1, 1, 64))
         self.seq = 0
+        self._p_ref = float(np.mean(np.abs(self._static_channel()) ** 2))
         self.breath_phase = 0.0
         self.heart_phase = 0.0
+        self.posture_offset = 0.0
         self._last_t = 0.0
+        self._stall_until = -1.0
+
+    # ------------------------------------------------------------------ truth
+
+    def heart_bpm(self, t: float) -> float:
+        rsa = self.sc.hrv_bpm * math.sin(2 * math.pi * self.breath_phase)
+        return self.sc.heart_bpm + rsa + 1.5 * math.sin(2 * math.pi * t / 47.0)
+
+    # --------------------------------------------------------------- channel
+
+    def _static_channel(self) -> np.ndarray:
+        lam = C / self.freqs
+        h = np.zeros(64, dtype=np.complex128)
+        for L, a, ph in zip(self.static_len, self.static_amp, self.static_phase):
+            h += a * np.exp(-2j * np.pi * L / lam + 1j * ph)
+        return h
+
+    def _channel(self, t: float) -> np.ndarray:
+        sc, r = self.sc, self.rng
+        lam = C / self.freqs
+        h = np.zeros(64, dtype=np.complex128)
+        for L, a, ph in zip(self.static_len, self.static_amp, self.static_phase):
+            h += a * np.exp(-2j * np.pi * L / lam + 1j * ph)
+        if sc.present(t):
+            disp = sc.breath_mm * 1e-3 * breath_shape(self.breath_phase) + \
+                sc.heart_mm * 1e-3 * heart_shape(self.heart_phase)
+            L = self.body_len0 + 2 * disp + self.posture_offset
+            amp = self.body_amp
+            shadow = 0.35  # the seated body blocks part of the direct path
+            if sc.moving(t):
+                self._move_walk = getattr(self, "_move_walk", 0.0) + r.normal(0, 0.01)
+                L += self._move_walk
+                amp *= float(np.clip(1 + r.normal(0, 0.4), 0.3, 2.0))
+                shadow *= float(np.clip(1 + r.normal(0, 0.5), 0.0, 2.0))
+            h += amp * np.exp(-2j * np.pi * L / lam + 1j * self.body_phase)
+            h -= shadow * self.static_amp[0] * np.exp(-2j * np.pi * self.static_len[0] / lam + 1j * self.static_phase[0])
+        if sc.moving(t):
+            # A moving body is a big scatterer: arms and torso add strong,
+            # fast-changing reflections; the resting position drifts.
+            self.posture_offset += r.normal(0, 0.01)
+            if not hasattr(self, "_limb"):
+                self._limb = np.array([4.8, 5.6, 6.3])
+            self._limb = self._limb + r.normal(0, 0.03, 3)
+            for L, a in zip(self._limb, (0.5, 0.35, 0.25)):
+                h += a * np.exp(-2j * np.pi * L / lam + 1j * r.uniform(0, 0.3))
+        return h
+
+    def _radio(self, h: np.ndarray, kind: str, n_est: int = 1) -> list[np.ndarray]:
+        """What the ESP32 reports: gain, random phase, timing slope, noise.
+
+        Returns `n_est` estimates of the same packet (L-LTF and HT-LTF share
+        the packet's phase and gain; only their noise differs).
+        """
+        r, sc = self.rng, self.sc
+        if kind == "beacon":
+            h = h * self.beacon_resp
+            snr = sc.snr_db - 6
+        elif kind == "foreign":
+            self.foreign_resp *= np.exp(1j * r.normal(0, 0.05, 64))
+            h = h * self.foreign_resp * r.uniform(0.6, 1.6)
+            snr = sc.snr_db
+        else:
+            snr = sc.snr_db
+        k = np.arange(-32, 32)
+        h = h * np.exp(1j * (r.uniform(0, 2 * np.pi) + 2 * np.pi * k * r.normal(0, 0.004)))
+        p = np.mean(np.abs(h) ** 2)
+        sigma = math.sqrt(p / 2 / 10 ** (snr / 10))
+        agc = r.choice([0.8, 1.0, 1.0, 1.0, 1.25])
+        scale = 22 * agc / math.sqrt(p)
+        out = []
+        for _ in range(n_est):
+            noise = (r.normal(0, 1, 64) + 1j * r.normal(0, 1, 64)) * sigma
+            out.append((h + noise) * scale)
+        return out
+
+    @staticmethod
+    def _pack(h_lltf: np.ndarray, h_htltf: np.ndarray | None) -> bytes:
+        def block(h, idx):
+            out = np.zeros(64, dtype=np.complex128)
+            out[idx] = h[idx]
+            im = np.clip(np.round(out.imag), -127, 127).astype(np.int8)
+            re = np.clip(np.round(out.real), -127, 127).astype(np.int8)
+            b = np.empty(128, dtype=np.int8)
+            b[0::2] = im
+            b[1::2] = re
+            return b.tobytes()
+
+        # h arrays are indexed k+32 (subcarrier k); the firmware block uses ESP order.
+        def esp_order(h):
+            esp = np.zeros(64, dtype=np.complex128)
+            esp[0:32] = h[32:64]   # subcarriers 0..31
+            esp[32:64] = h[0:32]   # subcarriers -32..-1
+            return esp
+
+        data = block(esp_order(h_lltf), LLTF_INDEX)
+        if h_htltf is not None:
+            data += block(esp_order(h_htltf), HTLTF_INDEX)
+        return data
+
+    # ------------------------------------------------------------------ frames
 
     def frame(self, t: float) -> bytes | None:
-        """The packet the board would send at session time `t` (None = lost)."""
+        """The packet the board would send at session time `t` (None = nothing)."""
         sc, r = self.sc, self.rng
         dt = max(0.0, t - self._last_t)
         self._last_t = t
-        self.breath_phase += 2 * math.pi * sc.breath_bpm(t) / 60.0 * dt
-        hr = sc.heart_bpm + 2.0 * math.sin(2 * math.pi * t / 47.0)
-        self.heart_phase += 2 * math.pi * hr / 60.0 * dt
-
-        breath = math.sin(self.breath_phase) + 0.25 * math.sin(2 * self.breath_phase + 0.6)
-        heart = math.sin(self.heart_phase) + 0.4 * math.sin(2 * self.heart_phase)
-        mod = 1.0 + sc.breath_depth * breath * self.breath_gain + sc.heart_depth * heart * self.heart_gain
-
-        moving = any(s <= t < s + sc.shift_len_s for s in sc.shifts_at)
-        if moving:
-            self.posture += r.normal(0, 0.02, N_SUB)
-            mod = mod * (1.0 + r.normal(0, 0.15, N_SUB))
-        amp = self.base * mod * (1.0 + self.posture) * (1.0 + r.normal(0, sc.noise, N_SUB))
-        amp = np.clip(amp, 0, None)
-
-        self.seq += 1
-        if r.random() < sc.loss:
+        self.breath_phase += sc.breath_bpm(t) / 60.0 * dt
+        self.heart_phase += self.heart_bpm(t) / 60.0 * dt
+        if sc.outage(t) or t < self._stall_until:
             return None
-
-        is_beacon = r.random() < 0.25
-        agc = r.choice([0.8, 1.0, 1.0, 1.0, 1.25]) * (0.9 if is_beacon else 1.0)
-        amp = amp * agc
-        ph = self.phase + r.normal(0, 0.3, N_SUB) + r.uniform(0, 2 * math.pi)
-        re = np.clip(np.round(amp * np.cos(ph)), -127, 127).astype(np.int8)
-        im = np.clip(np.round(amp * np.sin(ph)), -127, 127).astype(np.int8)
-        iq = np.empty(2 * N_SUB, dtype=np.int8)
-        iq[0::2] = im
-        iq[1::2] = re
-        payload = iq.tobytes()
-        if not is_beacon:
-            # HT data frames carry HT-LTF (and STBC) after the LLTF block.
-            payload += (iq.tobytes() * 2)
-        rssi = int(-42 + r.normal(0, 1.5))
+        self.seq += 1
+        u = r.random()
+        if u < sc.beacon_share:
+            kind = "beacon"
+        elif sc.firmware == "old" and u < sc.beacon_share + sc.foreign_share:
+            kind = "foreign"
+        else:
+            kind = "reply"
+            if r.random() < sc.loss:
+                if sc.firmware == "old":
+                    self._stall_until = t + 1.0  # esp_ping waits its 1 s timeout
+                return None
+        h = self._channel(t)
+        if kind == "beacon":
+            (hl,) = self._radio(h, kind)
+            payload = self._pack(hl, None)
+        else:
+            # The radio's merged HT-LTF: L-LTF averaged with the HT-LTF estimate.
+            hl, h2 = self._radio(h, kind, n_est=2)
+            payload = self._pack(hl, 0.5 * (hl + h2))
+        # RSSI follows the channel's power (the body shadowing it, moving)
+        rssi = int(round(-42 + 10 * math.log10(float(np.mean(np.abs(h) ** 2)) / self._p_ref + 1e-9) + r.normal(0, 0.7)))
+        if sc.firmware == "new":
+            flags = FLAG_TO_ME if kind == "reply" else 0
+            return build_csi(payload, self.seq, rssi=rssi, flags=flags, dev_ts_us=int(t * 1e6))
         return build_csi(payload, self.seq, rssi=rssi)
 
     def frame_times(self, duration: float, start: float = 0.0):
-        """Irregular arrival times, like real CSI callbacks."""
-        r = random.Random(self.sc.seed)
+        """Irregular arrival times, like real CSI callbacks (capped at 50 Hz by the firmware)."""
+        r = np.random.default_rng(self.sc.seed + 1)
         t = start
+        rate = self.sc.frame_rate
         while t < start + duration:
-            t += r.expovariate(self.sc.frame_rate) * 0.6 + 0.4 / self.sc.frame_rate
+            t += max(0.02, r.exponential(1.0 / rate) * 0.5 + 0.5 / rate)
             yield t
 
 

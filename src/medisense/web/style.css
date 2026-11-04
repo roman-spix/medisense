@@ -23,6 +23,11 @@
   --good-text: #006300;
   --radius: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --st-steady: #1baf7a;
+  --st-settling: #a6dcc6;
+  --st-restless: #ec835a;
+  --st-drowsy: #6250d6;
+  --st-away: #c3c2b7;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -44,6 +49,11 @@
     --accent: #3987e5;
     --good-text: #0ca30c;
     --shadow: none;
+    --st-steady: #199e70;
+    --st-settling: #1f5844;
+    --st-restless: #d9744a;
+    --st-drowsy: #9085e9;
+    --st-away: #4a4a46;
   }
 }
 :root[data-theme="dark"] {
@@ -65,6 +75,11 @@
   --accent: #3987e5;
   --good-text: #0ca30c;
   --shadow: none;
+  --st-steady: #199e70;
+  --st-settling: #1f5844;
+  --st-restless: #d9744a;
+  --st-drowsy: #9085e9;
+  --st-away: #4a4a46;
 }
 
 * { box-sizing: border-box; }
@@ -140,6 +155,7 @@ main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 40px; }
 dl.mini { display: flex; gap: 18px; margin: 0 0 4px auto; }
 dl.mini.wide { margin: 10px 0 0; }
 dl.mini.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+dl.mini.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
 dl.mini dt { color: var(--text-muted); font-size: 12px; }
 dl.mini dd { margin: 0; font-weight: 600; }
 
@@ -247,3 +263,48 @@ dialog h2 { font-size: 18px; }
 @media (forced-colors: active) {
   .pill .dot, .key, .meter span { forced-color-adjust: none; }
 }
+
+/* ------------------------------------------------- posture app & shared bits */
+.grow-gap { flex: 1; }
+.state-text.small { font-size: 20px; }
+.advice { margin: 10px 0; padding-left: 18px; color: var(--text-primary); }
+.advice li { margin: 4px 0; }
+.points { list-style: none; margin: 0; padding: 0; }
+.points .pt { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--grid); align-items: flex-start; }
+.points .pt:last-child { border-bottom: 0; }
+.pt-icon { width: 20px; text-align: center; font-weight: 700; color: var(--text-secondary); flex: none; }
+.pt-status { color: var(--text-muted); font-size: 12.5px; }
+.pt .tip { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+.pt-major .pt-icon { color: var(--critical); }
+.pt-minor .pt-icon { color: var(--text-primary); }
+.slider { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; color: var(--text-secondary); margin: 6px 0 10px; }
+.slider input { width: 100%; }
+.pose.tall { height: 220px; width: 100%; object-fit: cover; }
+.chart-md { height: 160px; }
+.card .check { margin: 6px 0; }
+
+/* ---- practice state strip, profile, posture card (v2) ---- */
+.strip-wrap { margin: 4px 0 14px; }
+.strip-wrap h3 { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; }
+.strip { display: block; width: 100%; height: 22px; border-radius: 4px; background: var(--surface-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.state-line.compact { margin: 0 0 6px; }
+.advice-line { min-height: 1.4em; margin: 4px 0 0; color: var(--text-primary); }
+details.settings { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+details.settings summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+details.settings[open] summary { margin-bottom: 8px; }
+.profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 10px; }
+.profile-head .stage { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.profile-head .lean { font-size: 13px; color: var(--text-secondary); }
+.trend-up, .trend-down, .trend-flat { font-size: 12px; font-weight: 500; margin-left: 4px; }
+.trend-up { color: var(--good-text); }
+.trend-down { color: var(--serious); }
+.trend-flat { color: var(--text-muted); }
+.profile-advice { margin: 12px 0 0; padding-left: 18px; }
+.profile-advice li { margin: 4px 0; }
+.howto { margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
+.howto summary { cursor: pointer; }
+.howto p { margin: 6px 0; }
+@media (max-width: 720px) { dl.mini.grid3 { grid-template-columns: 1fr 1fr; } }

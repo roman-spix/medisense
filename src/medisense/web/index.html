@@ -48,7 +48,7 @@
           </label>
         </div>
         <div class="row wrap gap between">
-          <label class="check"><input type="checkbox" id="use-camera"> Track posture with the webcam (video stays in this browser and is never saved)</label>
+          <label class="check"><input type="checkbox" id="use-camera"> Watch my posture with the webcam (the seven-point Vairocana posture; video is never saved)</label>
           <button id="btn-start" class="primary big">Start session</button>
         </div>
       </div>
@@ -85,20 +85,21 @@
       </article>
 
       <article class="card" aria-labelledby="h-heart">
-        <header class="card-h"><h2 id="h-heart">Heart rate</h2><span class="tag">rough</span></header>
+        <header class="card-h"><h2 id="h-heart">Heart rate</h2><span class="tag" id="heart-tag">needs a sensor</span></header>
         <div class="hero"><span id="heart-val" class="hero-num small">--</span><span class="unit">beats / min</span></div>
-        <div class="meter" title="How clear the heartbeat is in the WiFi signal"><span id="heart-meter"></span></div>
-        <p class="caption" id="heart-note">From tiny chest movements in the WiFi signal. Compare with your Polar watch using “Watch heart rate”.</p>
+        <p class="caption" id="heart-note">WiFi alone can't measure your pulse reliably: in testing it was off by up to 20 beats. Use your Polar watch with “Watch heart rate”, or add a pulse sensor (MediSense Pro).</p>
+        <div class="row gap-s between"><button id="heart-exp-btn" class="ghost small" aria-pressed="false">Show WiFi estimate</button><span class="caption" id="heart-exp"></span></div>
       </article>
 
       <article class="card" aria-labelledby="h-still">
-        <header class="card-h"><h2 id="h-still">Stillness</h2></header>
+        <header class="card-h"><h2 id="h-still">Practice</h2><span class="hint" id="still-hint"></span></header>
         <div class="state-line"><span id="still-icon" class="state-icon" aria-hidden="true">○</span><span id="still-val" class="state-text">--</span></div>
+        <p class="caption" id="state-note">Start sitting: MediSense shows when your body has settled.</p>
         <canvas id="motion-spark" class="spark" aria-label="Movement, last 5 minutes"></canvas>
-        <p class="caption">Movement over the last 5 minutes. Above the faint line counts as restless.</p>
-        <dl class="mini wide">
-          <div><dt>Settled for</dt><dd id="settled">--</dd></div>
-          <div><dt>Shifts this session</dt><dd id="shifts">0</dd></div>
+        <dl class="mini wide grid3">
+          <div><dt>Still for</dt><dd id="settled">--</dd></div>
+          <div><dt>Steady so far</dt><dd id="steady-so-far">--</dd></div>
+          <div><dt>Shifts</dt><dd id="shifts">0</dd></div>
         </dl>
       </article>
 
@@ -108,19 +109,27 @@
         </header>
         <div class="row gap align-end">
           <div class="hero"><span id="posture-val" class="hero-num small">--</span><span class="unit">/ 100</span></div>
-          <dl class="mini">
-            <div><dt>Head drop</dt><dd id="posture-slump">--</dd></div>
-            <div><dt>Head tilt</dt><dd id="posture-tilt">--</dd></div>
-          </dl>
+          <div class="state-line compact"><span id="posture-icon" class="state-icon" aria-hidden="true">○</span><span id="posture-state" class="state-text small">Camera off</span></div>
         </div>
+        <p class="caption advice-line" id="posture-advice"></p>
         <canvas id="pose" class="pose" aria-label="Posture skeleton"></canvas>
+        <img id="pose-img" class="pose" alt="Camera preview" hidden>
         <div class="row gap-s between">
           <span class="caption" id="posture-note">Camera is off.</span>
           <span class="row gap-s">
             <button id="cam-video" class="ghost small" hidden>Show video</button>
-            <button id="cam-recal" class="ghost small" hidden>Recalibrate</button>
+            <button id="cam-recal" class="ghost small" hidden>Calibrate</button>
           </span>
         </div>
+        <details class="settings" id="posture-settings">
+          <summary>Reminders during meditation</summary>
+          <label class="slider">Remind me below <b id="v-threshold">80</b>
+            <input type="range" id="p-threshold" min="50" max="95" step="5" value="80"></label>
+          <label class="slider">…for at least <b id="v-hold">30 s</b>
+            <input type="range" id="p-hold" min="10" max="120" step="5" value="30"></label>
+          <label class="check"><input type="checkbox" id="p-enabled" checked> macOS notification</label>
+          <label class="check"><input type="checkbox" id="p-sound" checked> With a soft sound</label>
+        </details>
       </article>
 
       <article class="card" aria-labelledby="h-signal">
@@ -137,9 +146,14 @@
 
       <article class="card span3" aria-labelledby="h-trend">
         <header class="card-h"><h2 id="h-trend">Over time</h2><span class="hint" id="trend-hint">Last 10 minutes</span></header>
+        <div class="strip-wrap">
+          <h3>Practice</h3>
+          <canvas id="t-state" class="strip" aria-label="Practice state over time"></canvas>
+          <div class="legend" id="state-legend"></div>
+        </div>
         <div class="multiples">
           <div><h3><span class="key" style="background:var(--breath)"></span>Breathing (per min)</h3><canvas id="t-breath"></canvas></div>
-          <div><h3><span class="key" style="background:var(--heart)"></span>Heart rate (per min, rough)</h3><canvas id="t-heart"></canvas></div>
+          <div><h3><span class="key" style="background:var(--heart)"></span><span id="t-heart-title">Heart rate (per min)</span></h3><canvas id="t-heart"></canvas></div>
           <div><h3><span class="key" style="background:var(--motion)"></span>Movement (× quiet level)</h3><canvas id="t-motion"></canvas></div>
           <div><h3><span class="key" style="background:var(--posture)"></span>Posture score</h3><canvas id="t-posture"></canvas></div>
         </div>
@@ -155,20 +169,24 @@
       <p>Start a session on the Live tab. Every session is saved on this Mac in the MediSense folder in your home folder.</p>
     </div>
     <div id="history-body">
+      <article class="card" aria-labelledby="h-where">
+        <header class="card-h"><h2 id="h-where">Where you are now</h2><span class="hint" id="where-hint"></span></header>
+        <div id="profile"></div>
+      </article>
       <article class="card">
         <header class="card-h"><h2>Progress</h2><span class="hint">One column per session, oldest on the left</span></header>
         <div class="multiples">
           <div><h3><span class="key" style="background:var(--breath)"></span>Minutes meditated</h3><canvas id="p-minutes"></canvas></div>
-          <div><h3><span class="key" style="background:var(--breath)"></span>Breathing at the end (per min)</h3><canvas id="p-breath"></canvas></div>
-          <div><h3><span class="key" style="background:var(--motion)"></span>Stillness (% of time)</h3><canvas id="p-still"></canvas></div>
-          <div><h3><span class="key" style="background:var(--posture)"></span>Posture (average score)</h3><canvas id="p-posture"></canvas></div>
+          <div><h3><span class="key" style="background:var(--motion)"></span>Steady (% of your time sitting)</h3><canvas id="p-steady"></canvas></div>
+          <div><h3><span class="key" style="background:var(--text-secondary)"></span>Time to settle (minutes, lower is quicker)</h3><canvas id="p-settle"></canvas></div>
+          <div><h3><span class="key" style="background:var(--breath)"></span>Breathing while steady (per min)</h3><canvas id="p-breath"></canvas></div>
         </div>
       </article>
       <article class="card">
         <header class="card-h"><h2>Sessions</h2></header>
         <div class="table-wrap">
           <table class="sessions">
-            <thead><tr><th>When</th><th>Practice</th><th class="num">Minutes</th><th class="num">Breathing start → end</th><th class="num">Stillness</th><th class="num">Shifts</th><th class="num">Posture</th><th class="num">Rating</th></tr></thead>
+            <thead><tr><th>When</th><th>Practice</th><th class="num">Minutes</th><th class="num">Settled in</th><th class="num">Steady</th><th class="num">Breathing</th><th class="num">Restless · drowsy</th><th class="num">Posture</th><th class="num">Rating</th></tr></thead>
             <tbody id="sessions-rows"></tbody>
           </table>
         </div>
@@ -185,6 +203,10 @@
       <dl class="facts" id="board-facts"></dl>
     </article>
     <article class="card">
+      <header class="card-h"><h2>Interruptions</h2><span class="hint">Why the data stopped, when the board says so over USB</span></header>
+      <ul class="events" id="board-events"><li class="caption">None so far.</li></ul>
+    </article>
+    <article class="card">
       <header class="card-h"><h2>Board log</h2><span class="hint">Messages the board prints over USB</span></header>
       <pre id="board-log" class="log">No messages yet.</pre>
     </article>
@@ -193,10 +215,11 @@
       <ul class="tips">
         <li>Put the board <b>1–2 m from where you sit</b>, about chest height, with your body between the board and the WiFi router if you can.</li>
         <li>The router should be in the same room or the next one. Breathing shows up best when the signal passes through or bounces off your chest.</li>
-        <li>Sit still for the first 30 seconds: the breathing number appears after about 20 seconds of quiet.</li>
+        <li>Sit still for the first minute: the breathing number appears after about 40 seconds of quiet, and “steady” after a minute without moving.</li>
         <li>Keep other people and pets out of the room, and don't let fans or curtains move near the board.</li>
         <li>For posture, put the laptop so the camera sees your head and shoulders (hips too if possible).</li>
-        <li>Heart rate from WiFi is rough. Check it against your Polar watch with “Watch heart rate” during sessions; that also helps improve MediSense later.</li>
+        <li>Keep the board on USB power from this Mac during sessions: its log then explains any interruption (power dips, WiFi drops).</li>
+        <li>WiFi can't measure heart rate reliably. Enter your Polar watch's number with “Watch heart rate” now and then, or add a pulse sensor (see the MediSense Pro guide).</li>
       </ul>
     </article>
   </section>

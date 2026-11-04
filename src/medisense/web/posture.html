@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediSense Posture</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%236250d6'/%3E%3Cpath d='M16 7v18M11 12h10' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="var(--posture)"/><path d="M16 7v18M11 12h10" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+    <span>MediSense Posture</span>
+  </div>
+  <div id="pill" class="pill" role="status"><span class="dot"></span><span id="pill-text">Starting…</span></div>
+  <span class="grow-gap"></span>
+  <button id="theme" class="ghost icon" title="Light / dark" aria-label="Switch light or dark theme">◐</button>
+</header>
+
+<main>
+  <div class="grid">
+    <article class="card" aria-labelledby="h-now">
+      <header class="card-h"><h2 id="h-now">Now</h2>
+        <div class="chips" id="modes" role="radiogroup" aria-label="Mode">
+          <button class="chip" data-mode="meditation">Meditation</button><button class="chip" data-mode="desk">Desk</button>
+        </div>
+      </header>
+      <div class="hero"><span id="score" class="hero-num">--</span><span class="unit">/ 100</span></div>
+      <div class="state-line"><span id="state-icon" class="state-icon" aria-hidden="true">…</span><span id="state" class="state-text small">Waiting for the camera</span></div>
+      <ul id="advice" class="advice"></ul>
+      <div class="row gap-s wrap">
+        <button id="calibrate" class="primary">Calibrate my posture</button>
+        <button id="pause" class="ghost">Pause reminders</button>
+      </div>
+      <p class="caption" id="calib-note">Sit in your best Vairocana posture, then click Calibrate. MediSense remembers it and measures drift from it.</p>
+    </article>
+
+    <article class="card" aria-labelledby="h-points">
+      <header class="card-h"><h2 id="h-points">The seven points</h2></header>
+      <ul id="points" class="points"></ul>
+      <p class="caption">Eyes and mouth can't be checked by the camera; legs and hands only when they're in view.</p>
+    </article>
+
+    <article class="card" aria-labelledby="h-cam">
+      <header class="card-h"><h2 id="h-cam">Camera</h2><button id="preview" class="ghost small">Show camera</button></header>
+      <canvas id="pose" class="pose tall" aria-label="Posture skeleton"></canvas>
+      <img id="preview-img" class="pose tall" alt="Camera preview" hidden>
+      <p class="caption" id="cam-note">Starting the camera…</p>
+      <button id="browser-cam" class="ghost small" hidden>Use this page's camera instead</button>
+    </article>
+
+    <article class="card span2" aria-labelledby="h-today">
+      <header class="card-h"><h2 id="h-today">Today</h2><select id="day" aria-label="Day"></select></header>
+      <div class="tiles">
+        <div class="tile"><div class="l">Tracked</div><div class="v" id="t-min">--</div><div class="s">minutes</div></div>
+        <div class="tile"><div class="l">Aligned</div><div class="v" id="t-aligned">--</div><div class="s">score 80 or more</div></div>
+        <div class="tile"><div class="l">Average</div><div class="v" id="t-avg">--</div><div class="s">posture score</div></div>
+        <div class="tile"><div class="l">Reminders</div><div class="v" id="t-alerts">--</div><div class="s" id="t-fault">&nbsp;</div></div>
+      </div>
+      <h3><span class="key" style="background:var(--posture)"></span>Posture score through the day</h3>
+      <canvas id="day-chart" class="chart-md"></canvas>
+    </article>
+
+    <article class="card" aria-labelledby="h-rem">
+      <header class="card-h"><h2 id="h-rem">Reminders</h2></header>
+      <label class="slider">Remind me below <b id="v-threshold">80</b>
+        <input type="range" id="threshold" min="50" max="95" step="5" value="80"></label>
+      <label class="slider">…for at least <b id="v-hold">20 s</b>
+        <input type="range" id="hold" min="5" max="120" step="5" value="20"></label>
+      <label class="slider">At most every <b id="v-cooldown">3 min</b>
+        <input type="range" id="cooldown" min="1" max="20" step="1" value="3"></label>
+      <label class="check"><input type="checkbox" id="enabled" checked> Send macOS notifications</label>
+      <label class="check"><input type="checkbox" id="sound" checked> With a soft sound</label>
+      <div class="row gap-s"><button id="test" class="ghost small">Send a test notification</button><span class="caption" id="test-note"></span></div>
+      <p class="caption">No notification? System Preferences → Notifications → Script Editor → Allow Notifications.</p>
+    </article>
+  </div>
+
+  <article class="card">
+    <header class="card-h"><h2>About the Vairocana posture</h2></header>
+    <ol class="tips">
+      <li><b>Legs</b> crossed in vajra or half-lotus (or simply crossed), knees low.</li>
+      <li><b>Hands</b> in the mudra of meditative equipoise: right hand resting on the left, palms up, thumbs lightly touching, a few finger-widths below the navel.</li>
+      <li><b>Spine</b> straight like an arrow, or a stack of coins: upright, neither rigid nor slumped.</li>
+      <li><b>Shoulders</b> level and open, “like a vulture's wings”: relaxed, not hunched.</li>
+      <li><b>Neck</b> slightly bent, chin a little tucked, the head neither dropping nor raised.</li>
+      <li><b>Eyes</b> resting, gaze directed down past the tip of the nose.</li>
+      <li><b>Mouth</b> relaxed, lips lightly closed, the tongue resting against the upper palate.</li>
+    </ol>
+    <p class="caption">A dropping head often comes with dullness; raised shoulders and a pushed-forward head with tension or agitation. The reminder names what drifted so you can correct it gently.</p>
+  </article>
+</main>
+
+<script type="module" src="/static/posture-app.js"></script>
+</body>
+</html>

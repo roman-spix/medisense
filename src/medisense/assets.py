@@ -35,6 +35,10 @@ MP_FILES = [
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 MODEL_SHA256 = "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"
 MODEL_NAME = "pose_landmarker_lite.task"
+# The background camera engine uses the larger, more accurate model (CPU, a few frames/s).
+FULL_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task"
+FULL_MODEL_SHA256 = "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1"
+FULL_MODEL_NAME = "pose_landmarker_full.task"
 
 _lock = asyncio.Lock()
 
@@ -75,6 +79,24 @@ def _download(url: str) -> bytes:
                 raise
             last = e
     raise last if last else RuntimeError("download failed")
+
+
+def fetch_full_model_sync() -> Path:
+    path = asset_dir() / FULL_MODEL_NAME
+    if not path.exists():
+        log.info("downloading the full pose model")
+        blob = _download(FULL_MODEL_URL)
+        if hashlib.sha256(blob).hexdigest() != FULL_MODEL_SHA256:
+            raise RuntimeError("Pose model download failed its integrity check")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(blob)
+        tmp.replace(path)
+    return path
+
+
+async def ensure_pose_model() -> Path:
+    async with _lock:
+        return await asyncio.to_thread(fetch_full_model_sync)
 
 
 def fetch_sync() -> None:

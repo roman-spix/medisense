@@ -10,7 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
+from . import insights
 from .config import data_dir, sessions_dir
+
+SUMMARY_VERSION = 2  # bump when the summary gains or changes numbers: old sessions are re-summarised
+
+
+STRING_FIELDS = {"signal", "motion_state", "presence", "frame_class", "posture_faults", "state", "sensor_hr_source"}
 
 
 def _f(v) -> float | None:
@@ -29,7 +35,7 @@ def load_metrics(path: Path) -> dict[str, list]:
     with open(f, newline="") as fh:
         for row in csv.DictReader(fh):
             for k, v in row.items():
-                if k in ("signal", "motion_state", "presence"):
+                if k in STRING_FIELDS:
                     cols.setdefault(k, []).append(v)
                 else:
                     cols.setdefault(k, []).append(_f(v))
@@ -75,7 +81,7 @@ def summarize(path: Path) -> dict:
     events = load_events(path)
     t = m.get("t", [])
     n = len(t)
-    s: dict = {"seconds_recorded": n}
+    s: dict = {"v": SUMMARY_VERSION, "seconds_recorded": n}
     if not n:
         return s
     br = m.get("breath_rate", [None] * n)
@@ -100,7 +106,10 @@ def summarize(path: Path) -> dict:
             s["breath_lowest_minute"] = round(float(arr.min()), 2)
     s["breath_regularity"] = _mean(m.get("breath_regularity", []))
     hr_valid = [h for h in hr if h is not None]
-    s["heart_avg"] = _mean(hr_valid)
+    s["heart_avg"] = _mean(hr_valid)  # trusted heart rate only (a pulse sensor; never WiFi)
+    s["heart_wifi_avg"] = _mean(m.get("heart_rate_experimental", []))
+    s["sensor_hr_avg"] = _mean(m.get("sensor_hr", []))
+    s["hrv_rmssd_avg"] = _mean(m.get("hrv_rmssd", []))
     known = [st for st in states if st in ("still", "restless", "moving")]
     if known:
         s["stillness_pct"] = round(100.0 * known.count("still") / len(known), 1)
@@ -114,6 +123,12 @@ def summarize(path: Path) -> dict:
         s["posture_avg"] = round(float(np.mean(ps)), 1)
         s["posture_upright_pct"] = round(100.0 * sum(1 for p in ps if p >= 80) / len(ps), 1)
     s["slump_events"] = sum(1 for e in events if e.get("kind") == "slump")
+    s["nods"] = sum(1 for e in events if e.get("kind") == "nod")
+    s["posture_alerts"] = sum(1 for e in events if e.get("kind") == "posture_alert")
+    firsts = [f.split(";")[0] for f in m.get("posture_faults", []) if f]
+    if len(firsts) >= 30:
+        s["posture_main_fault"] = max(set(firsts), key=firsts.count)
+    s.update(insights.analyze(m, events))
     return s
 
 
@@ -128,8 +143,14 @@ def list_sessions(root: Path | None = None) -> list[dict]:
             meta = json.loads(meta_f.read_text())
         except ValueError:
             continue
-        if "summary" not in meta and meta.get("ended_at"):
-            meta["summary"] = summarize(d)
+        if meta.get("ended_at") and (meta.get("summary") or {}).get("v") != SUMMARY_VERSION:
+            meta["summary"] = summarize(d)  # older app version: add the new numbers
+            try:
+                tmp = d / "session.json.tmp"
+                tmp.write_text(json.dumps(meta, indent=2))
+                tmp.replace(meta_f)
+            except OSError:
+                pass
         out.append(meta)
     return out
 
@@ -147,7 +168,7 @@ def load_session(sid: str) -> dict | None:
     if not p:
         return None
     meta = json.loads((p / "session.json").read_text())
-    if "summary" not in meta:
+    if (meta.get("summary") or {}).get("v") != SUMMARY_VERSION:
         meta["summary"] = summarize(p)
     posture: dict[str, list] = {}
     pf = p / "posture.csv"
@@ -155,8 +176,10 @@ def load_session(sid: str) -> dict | None:
         with open(pf, newline="") as fh:
             for row in csv.DictReader(fh):
                 for k, v in row.items():
-                    posture.setdefault(k, []).append(_f(v))
-    return {"meta": meta, "metrics": load_metrics(p), "events": load_events(p), "posture": posture}
+                    posture.setdefault(k, []).append(v if k in ("state", "faults") else _f(v))
+    metrics, events = load_metrics(p), load_events(p)
+    return {"meta": meta, "metrics": metrics, "events": events, "posture": posture,
+            "timeline": insights.timeline(metrics, events)}
 
 
 def update_meta(sid: str, fields: dict) -> dict | None:

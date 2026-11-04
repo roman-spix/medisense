@@ -433,6 +433,7 @@ class DeviceManager:
         self._ignored: set[str] = set()
         self._saved_pw = False
         self._missing_since: float | None = None
+        self.line_listeners: list[Callable[[str], None]] = []
         self._fw_checked = (-1e9, None)
 
     async def _refresh_ssid(self) -> None:
@@ -675,6 +676,11 @@ class DeviceManager:
     def _on_log_line(self, line: str) -> None:
         before = self._log_key()
         self.log.feed(line)
+        for listener in self.line_listeners:
+            try:
+                listener(line)
+            except Exception:
+                log.exception("board log listener")
         if self._log_key() != before:
             self._check_health()
 
@@ -683,7 +689,7 @@ class DeviceManager:
         if self.busy or self.state in ("needs_setup", "unsupported", "identifying", "flashing"):
             return
         now = time.monotonic()
-        receiving = now - self.data_seen() < 3
+        receiving = now - self.data_seen() < 10  # short WiFi hiccups aren't a disconnection
         if receiving:
             if self.state != "connected" or "Live" not in self.message:
                 self._set("connected", f"Live. Board on WiFi{f' at {self.log.board_ip}' if self.log.board_ip else ''}.")

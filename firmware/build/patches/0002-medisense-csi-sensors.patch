@@ -1,0 +1,608 @@
+diff --git a/firmware/esp32-csi-node/main/CMakeLists.txt b/firmware/esp32-csi-node/main/CMakeLists.txt
+index 0cabf5d..95ea8d2 100644
+--- a/firmware/esp32-csi-node/main/CMakeLists.txt
++++ b/firmware/esp32-csi-node/main/CMakeLists.txt
+@@ -3,6 +3,8 @@ set(SRCS
+     "edge_processing.c" "ota_update.c" "power_mgmt.c"
+     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
+     "mmwave_sensor.c"
++    # MediSense: optional MAX3010x pulse sensor on I2C
++    "medisense_ppg.c"
+     "swarm_bridge.c"
+     # ADR-081 — adaptive CSI mesh firmware kernel
+     "rv_radio_ops_esp32.c"
+diff --git a/firmware/esp32-csi-node/main/csi_collector.c b/firmware/esp32-csi-node/main/csi_collector.c
+index 6a15443..a8409fd 100644
+--- a/firmware/esp32-csi-node/main/csi_collector.c
++++ b/firmware/esp32-csi-node/main/csi_collector.c
+@@ -45,6 +45,34 @@ static bool s_node_id_early_set = false;
+ static uint8_t s_filter_mac[6] = {0};
+ static bool    s_filter_mac_set = false;
+ 
++/* ---- MediSense: frame selection for one board sensing one person ----
++ *
++ * Every frame the router sends to this board (the self-ping replies, and the
++ * host app's 50 Hz "pacer" packets) crosses the room the same way, from one
++ * transmit chain, so its CSI is directly comparable frame to frame. Frames the
++ * router sends to other devices are often beamformed (a different, drifting
++ * response) and frames from other transmitters belong to other paths. Upstream
++ * applied the 50 Hz rate gate BEFORE the source filter, so on a busy network
++ * most of the 50 slots per second went to frames that were then thrown away.
++ *
++ * Here frames are filtered first: from the router only (the configured filter,
++ * or else the BSSID this board is connected to), preferring frames addressed
++ * to this board; others (beacons, broadcasts) only fill in when no addressed
++ * frame arrived for MS_UNICAST_FALLBACK_US. Then the rate gate. */
++#define MS_UNICAST_FALLBACK_US (500 * 1000)
++#define MS_FLAG_TO_ME          0x20  /* byte 19: frame addressed to this board */
++#define MS_FLAG_FIRST_WORD_BAD 0x40  /* byte 19: first 4 CSI bytes invalid (hardware) */
++#define MS_FLAG_TIMESTAMP      0x80  /* byte 19: u32 rx_ctrl.timestamp (us) appended */
++static uint8_t  s_own_mac[6] = {0};
++static bool     s_own_mac_set = false;
++static uint8_t  s_ap_bssid[6] = {0};
++static bool     s_ap_bssid_set = false;
++static int64_t  s_last_to_me_us = -MS_UNICAST_FALLBACK_US;
++static uint32_t s_ms_to_me = 0;
++static uint32_t s_ms_other = 0;
++static uint32_t s_ms_foreign = 0;
++static bool     s_collector_ready = false;
++
+ /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
+  * Without this, the firmware compiles but crashes at runtime with:
+  *   "E (xxxx) wifi:CSI not enabled in menuconfig!"
+@@ -276,25 +304,42 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
+ {
+     (void)ctx;
+ 
++    int64_t now_us = esp_timer_get_time();
++
++    /* MediSense: source filter first (cheap compares), so the rate gate's
++     * slots go to frames that are actually used. ADR-060's configured filter
++     * wins; otherwise the AP this board is connected to. Uses defensive
++     * copies, never g_nvs_config (see #232/#375). */
++    const uint8_t *src = s_filter_mac_set ? s_filter_mac : (s_ap_bssid_set ? s_ap_bssid : NULL);
++    if (src != NULL && memcmp(info->mac, src, 6) != 0) {
++        s_ms_foreign++;
++        return;
++    }
++    bool to_me = s_own_mac_set && memcmp(info->dmac, s_own_mac, 6) == 0;
++    if (to_me) {
++        s_last_to_me_us = now_us;
++    } else if ((now_us - s_last_to_me_us) < MS_UNICAST_FALLBACK_US) {
++        s_ms_other++;
++        return;  /* addressed frames are flowing: don't mix in others */
++    }
++
+     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
+      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq). */
+-    int64_t now_us = esp_timer_get_time();
+     if ((now_us - s_last_process_us) < CSI_MIN_PROCESS_INTERVAL_US) {
+         s_early_drop++;
+         return;
+     }
+     s_last_process_us = now_us;
+ 
+-    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
+-     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
+-     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
+-    if (s_filter_mac_set) {
+-        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
+-            return;  /* Source MAC doesn't match filter — skip frame. */
+-        }
+-    }
+-
+     s_cb_count++;
++    if (to_me) {
++        s_ms_to_me++;
++    }
++    if ((s_cb_count % 1000) == 0) {
++        ESP_LOGI(TAG, "medisense frames: to_board=%lu other=%lu foreign=%lu rate_drop=%lu",
++                 (unsigned long)s_ms_to_me, (unsigned long)s_ms_other,
++                 (unsigned long)s_ms_foreign, (unsigned long)s_early_drop);
++    }
+ 
+     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
+         ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d",
+@@ -303,9 +348,20 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
+     }
+ 
+     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
+-    size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
++    size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf) - 4);
+ 
+     if (frame_len > 0) {
++        /* MediSense: mark addressed frames and the hardware's invalid-first-
++         * word case, and append the radio's own receive time (us) so the host
++         * can place frames on a jitter-free timeline. Old readers ignore both. */
++        uint8_t ms_flags = MS_FLAG_TIMESTAMP;
++        if (to_me) ms_flags |= MS_FLAG_TO_ME;
++        if (info->first_word_invalid) ms_flags |= MS_FLAG_FIRST_WORD_BAD;
++        frame_buf[19] |= ms_flags;
++        uint32_t rx_ts = (uint32_t)info->rx_ctrl.timestamp;
++        memcpy(&frame_buf[frame_len], &rx_ts, 4);
++        frame_len += 4;
++
+         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
+          * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
+          * We only need 20-50 Hz for the sensing pipeline. */
+@@ -459,6 +515,11 @@ static void csi_start_self_ping(void)
+     cfg.target_addr     = target;
+     cfg.count           = ESP_PING_COUNT_INFINITE;
+     cfg.interval_ms     = CSI_SELF_PING_INTERVAL_MS;
++    /* MediSense: the default 1000 ms timeout stalls the ping loop for a full
++     * second whenever one reply is lost, i.e. a 1 s hole in the CSI stream.
++     * The CSI comes from the reply frame itself, so waiting longer gains
++     * nothing; a late reply still produces CSI when it arrives. */
++    cfg.timeout_ms      = 2 * CSI_SELF_PING_INTERVAL_MS;
+     cfg.data_size       = 1;
+     cfg.task_stack_size = 4096;
+ 
+@@ -557,6 +618,12 @@ void csi_collector_init(void)
+     /* Update the hop table's first channel to match. */
+     s_hop_channels[0] = csi_channel;
+ 
++    /* MediSense: which frames are "ours" (see the frame-selection notes). */
++    if (esp_wifi_get_mac(WIFI_IF_STA, s_own_mac) == ESP_OK) {
++        s_own_mac_set = true;
++    }
++    csi_collector_refresh_ap();
++
+     /* Disable WiFi modem sleep — reliable CSI capture needs the radio awake.
+      * The ESP-IDF STA default is WIFI_PS_MIN_MODEM, which lets the modem
+      * sleep between DTIM beacons; with the MGMT-only promiscuous filter
+@@ -647,6 +714,30 @@ void csi_collector_init(void)
+      * receives a guaranteed OFDM unicast floor even when promiscuous capture is
+      * starved (display builds / quiet networks). Additive to #396/#893. */
+     csi_start_self_ping();
++    s_collector_ready = true;
++}
++
++void csi_collector_refresh_ap(void)
++{
++    wifi_ap_record_t ap;
++    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
++        memcpy(s_ap_bssid, ap.bssid, 6);
++        s_ap_bssid_set = true;
++        ESP_LOGI(TAG, "medisense: using frames from AP %02x:%02x:%02x:%02x:%02x:%02x%s",
++                 ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5],
++                 s_filter_mac_set ? " (configured filter takes precedence)" : "");
++    }
++}
++
++void csi_collector_on_connected(void)
++{
++    /* Called on (re)connection: the AP may have changed (roaming, mesh), and
++     * the gateway pinger may not have started at boot. */
++    if (!s_collector_ready) {
++        return;
++    }
++    csi_collector_refresh_ap();
++    csi_start_self_ping();
+ }
+ 
+ /* Accessor for other modules that need the authoritative runtime node_id. */
+@@ -760,6 +851,15 @@ static void hop_timer_cb(void *arg)
+ 
+ void csi_collector_enable_data_capture(void)
+ {
++#ifndef MEDISENSE_CAPTURE_ALL_DATA
++    /* MediSense: the board senses through the frames the router sends to it
++     * (self-ping replies, the host's pacer packets), which arrive whatever
++     * the promiscuous filter. Capturing every other device's DATA frames only
++     * adds hundreds of radio interrupts per second (the load behind RuView
++     * #396) and frames that are then filtered out. Keep MGMT-only. */
++    ESP_LOGI(TAG, "medisense: keeping MGMT-only promiscuous capture (CSI from frames to this board)");
++    return;
++#endif
+     /* MGMT-only (RuView#396) starves the CSI callback on display-less boards
+      * (RuView#521/#893): beacons alone are sparse, yield collapses to 0 pps.
+      * Without a display there is no QSPI/SPI-flash cache contention with the
+diff --git a/firmware/esp32-csi-node/main/csi_collector.h b/firmware/esp32-csi-node/main/csi_collector.h
+index 92f4310..b2ad92e 100644
+--- a/firmware/esp32-csi-node/main/csi_collector.h
++++ b/firmware/esp32-csi-node/main/csi_collector.h
+@@ -103,6 +103,17 @@ void csi_collector_start_hop_timer(void);
+  */
+ void csi_collector_enable_data_capture(void);
+ 
++/**
++ * MediSense: re-read the connected AP's BSSID (frames from it are the ones used).
++ */
++void csi_collector_refresh_ap(void);
++
++/**
++ * MediSense: call on every WiFi (re)connection; refreshes the AP and makes
++ * sure the gateway pinger runs. No-op before csi_collector_init().
++ */
++void csi_collector_on_connected(void);
++
+ /**
+  * Inject an NDP (Null Data Packet) frame for sensing.
+  *
+diff --git a/firmware/esp32-csi-node/main/main.c b/firmware/esp32-csi-node/main/main.c
+index 6991efe..a43f84e 100644
+--- a/firmware/esp32-csi-node/main/main.c
++++ b/firmware/esp32-csi-node/main/main.c
+@@ -30,6 +30,7 @@
+ #include "wasm_upload.h"
+ #include "display_task.h"
+ #include "mmwave_sensor.h"
++#include "medisense_ppg.h"     /* MediSense: optional MAX3010x pulse sensor */
+ #include "swarm_bridge.h"
+ #include "rv_radio_ops.h"          /* ADR-081 Layer 1 — Radio Abstraction Layer. */
+ #include "adaptive_controller.h"   /* ADR-081 Layer 2 — Adaptive controller. */
+@@ -61,6 +62,20 @@ static EventGroupHandle_t s_wifi_event_group;
+ static int s_retry_num = 0;
+ #define MAX_RETRY 10
+ 
++/* MediSense: upstream stopped reconnecting after MAX_RETRY failures in a
++ * row, leaving the board silent until someone reset it. Keep trying every
++ * few seconds instead (a router restart, a brief outage, a meditation
++ * session that outlasts both). */
++#define MEDISENSE_RECONNECT_MS 3000
++static esp_timer_handle_t s_reconnect_timer = NULL;
++
++static void reconnect_cb(void *arg)
++{
++    (void)arg;
++    ESP_LOGI(TAG, "Retrying WiFi connection");
++    esp_wifi_connect();
++}
++
+ static void event_handler(void *arg, esp_event_base_t event_base,
+                           int32_t event_id, void *event_data)
+ {
+@@ -75,12 +90,23 @@ static void event_handler(void *arg, esp_event_base_t event_base,
+             ESP_LOGI(TAG, "Retrying WiFi connection (%d/%d)", s_retry_num, MAX_RETRY);
+         } else {
+             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
++            if (s_reconnect_timer == NULL) {
++                const esp_timer_create_args_t args = { .callback = reconnect_cb, .name = "wifi_retry" };
++                esp_timer_create(&args, &s_reconnect_timer);
++            }
++            if (s_reconnect_timer != NULL) {
++                esp_timer_stop(s_reconnect_timer);
++                esp_timer_start_once(s_reconnect_timer, (uint64_t)MEDISENSE_RECONNECT_MS * 1000ULL);
++            }
+         }
++    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
++        csi_collector_on_connected();  /* MediSense: the AP may have changed */
+     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+         s_retry_num = 0;
+         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
++        csi_collector_on_connected();  /* MediSense: restart the gateway pinger if needed */
+     }
+ }
+ 
+@@ -424,6 +450,11 @@ void app_main(void)
+         ESP_LOGI(TAG, "No mmWave sensor detected (CSI-only mode)");
+     }
+ 
++    /* MediSense: optional pulse sensor (MAX30102/MAX30101/MAX30105) on I2C. */
++#ifndef CONFIG_CSI_MOCK_SKIP_WIFI_CONNECT
++    medisense_ppg_init();
++#endif
++
+     /* ADR-066: Initialize swarm bridge to Cognitum Seed (if configured). */
+     esp_err_t swarm_ret = ESP_ERR_INVALID_ARG;
+ #ifndef CONFIG_CSI_MOCK_SKIP_WIFI_CONNECT
+diff --git a/firmware/esp32-csi-node/main/medisense_ppg.c b/firmware/esp32-csi-node/main/medisense_ppg.c
+new file mode 100644
+index 0000000..e056419
+--- /dev/null
++++ b/firmware/esp32-csi-node/main/medisense_ppg.c
+@@ -0,0 +1,172 @@
++/**
++ * @file medisense_ppg.c
++ * @brief MediSense: MAX3010x pulse sensor (red + IR) streamed to the host.
++ *
++ * WiFi can't measure heart rate reliably; a fingertip (or earlobe) optical
++ * pulse sensor can, including beat-to-beat intervals for heart-rate
++ * variability. The board only samples and forwards: all analysis (beats,
++ * HRV, finger detection) happens in the MediSense app.
++ *
++ * Sensor setup: SpO2 mode (red + IR), 400 samples/s averaged by 4 = 100 Hz,
++ * 411 us pulses (18-bit), 4096 nA range, ~7 mA LEDs. The FIFO (32 samples) is
++ * read every 50 ms, i.e. ~5 samples per UDP packet:
++ *
++ *   [magic u32 0xC511D0B1][node u8][type u8 = 1][n u8][channels u8 = 2]
++ *   [seq u32][dev_ts_us u32 (last sample)][rate_hz u16][flags u16 (bit0 = overflow)]
++ *   [n x (red u32, ir u32)]
++ */
++
++#include "medisense_ppg.h"
++
++#include <string.h>
++#include "freertos/FreeRTOS.h"
++#include "freertos/task.h"
++#include "esp_log.h"
++#include "esp_timer.h"
++#include "driver/i2c_master.h"
++#include "stream_sender.h"
++#include "csi_collector.h"
++
++#ifndef MEDISENSE_PPG_SDA_GPIO
++#define MEDISENSE_PPG_SDA_GPIO 8
++#endif
++#ifndef MEDISENSE_PPG_SCL_GPIO
++#define MEDISENSE_PPG_SCL_GPIO 9
++#endif
++
++#define PPG_ADDR          0x57
++#define PPG_MAGIC         0xC511D0B1u
++#define PPG_RATE_HZ       100
++#define PPG_READ_MS       50
++#define PPG_FIFO_DEPTH    32
++
++/* MAX3010x registers */
++#define REG_FIFO_WR_PTR   0x04
++#define REG_OVF_COUNTER   0x05
++#define REG_FIFO_RD_PTR   0x06
++#define REG_FIFO_DATA     0x07
++#define REG_FIFO_CONFIG   0x08
++#define REG_MODE_CONFIG   0x09
++#define REG_SPO2_CONFIG   0x0A
++#define REG_LED1_PA       0x0C  /* red */
++#define REG_LED2_PA       0x0D  /* IR */
++#define REG_PART_ID       0xFF
++#define PART_ID_MAX3010X  0x15
++
++static const char *TAG = "medisense_ppg";
++static i2c_master_bus_handle_t s_bus = NULL;
++static i2c_master_dev_handle_t s_dev = NULL;
++
++static esp_err_t wr(uint8_t reg, uint8_t val)
++{
++    uint8_t b[2] = { reg, val };
++    return i2c_master_transmit(s_dev, b, 2, 50);
++}
++
++static esp_err_t rd(uint8_t reg, uint8_t *out, size_t n)
++{
++    return i2c_master_transmit_receive(s_dev, &reg, 1, out, n, 50);
++}
++
++static void ppg_task(void *arg)
++{
++    (void)arg;
++    static uint8_t raw[PPG_FIFO_DEPTH * 6];
++    static uint8_t pkt[20 + PPG_FIFO_DEPTH * 8];
++    uint32_t seq = 0;
++    uint32_t errors = 0;
++    TickType_t last = xTaskGetTickCount();
++
++    for (;;) {
++        vTaskDelayUntil(&last, pdMS_TO_TICKS(PPG_READ_MS));
++        uint8_t ptr[3];
++        if (rd(REG_FIFO_WR_PTR, ptr, 3) != ESP_OK) {  /* WR_PTR, OVF_COUNTER, RD_PTR */
++            if ((++errors % 100) == 1) ESP_LOGW(TAG, "I2C read failed (%lu)", (unsigned long)errors);
++            continue;
++        }
++        uint8_t wr_ptr = ptr[0] & 0x1F, ovf = ptr[1] & 0x1F, rd_ptr = ptr[2] & 0x1F;
++        int n = (wr_ptr - rd_ptr) & 0x1F;
++        if (ovf > 0) n = PPG_FIFO_DEPTH;  /* fell behind: the FIFO is full */
++        if (n == 0) continue;
++        if (rd(REG_FIFO_DATA, raw, (size_t)n * 6) != ESP_OK) {
++            errors++;
++            continue;
++        }
++        int64_t now = esp_timer_get_time();
++        uint32_t magic = PPG_MAGIC, ts = (uint32_t)now;
++        uint16_t rate = PPG_RATE_HZ, flags = ovf > 0 ? 1 : 0;
++        memcpy(&pkt[0], &magic, 4);
++        pkt[4] = csi_collector_get_node_id();
++        pkt[5] = 1;            /* MAX3010x */
++        pkt[6] = (uint8_t)n;
++        pkt[7] = 2;            /* red, IR */
++        memcpy(&pkt[8], &seq, 4);
++        memcpy(&pkt[12], &ts, 4);
++        memcpy(&pkt[16], &rate, 2);
++        memcpy(&pkt[18], &flags, 2);
++        for (int i = 0; i < n; i++) {
++            const uint8_t *p = &raw[i * 6];
++            uint32_t red = (((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2]) & 0x3FFFF;
++            uint32_t ir  = (((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 8) | p[5]) & 0x3FFFF;
++            memcpy(&pkt[20 + i * 8], &red, 4);
++            memcpy(&pkt[24 + i * 8], &ir, 4);
++        }
++        stream_sender_send_priority(pkt, 20 + (size_t)n * 8);  /* ~20 small packets/s */
++        seq++;
++    }
++}
++
++esp_err_t medisense_ppg_init(void)
++{
++    i2c_master_bus_config_t bus_cfg = {
++        .i2c_port = I2C_NUM_0,
++        .sda_io_num = MEDISENSE_PPG_SDA_GPIO,
++        .scl_io_num = MEDISENSE_PPG_SCL_GPIO,
++        .clk_source = I2C_CLK_SRC_DEFAULT,
++        .glitch_ignore_cnt = 7,
++        .flags.enable_internal_pullup = true,  /* most breakout boards also have their own */
++    };
++    esp_err_t err = i2c_new_master_bus(&bus_cfg, &s_bus);
++    if (err != ESP_OK) {
++        ESP_LOGW(TAG, "I2C bus init failed: %s", esp_err_to_name(err));
++        return err;
++    }
++    if (i2c_master_probe(s_bus, PPG_ADDR, 50) != ESP_OK) {
++        ESP_LOGI(TAG, "No pulse sensor on I2C (SDA=%d, SCL=%d)", MEDISENSE_PPG_SDA_GPIO, MEDISENSE_PPG_SCL_GPIO);
++        i2c_del_master_bus(s_bus);
++        s_bus = NULL;
++        return ESP_ERR_NOT_FOUND;
++    }
++    i2c_device_config_t dev_cfg = {
++        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
++        .device_address = PPG_ADDR,
++        .scl_speed_hz = 400000,
++    };
++    err = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
++    if (err != ESP_OK) {
++        return err;
++    }
++    uint8_t part = 0;
++    if (rd(REG_PART_ID, &part, 1) != ESP_OK || part != PART_ID_MAX3010X) {
++        ESP_LOGW(TAG, "Device at 0x57 is not a MAX3010x (part id 0x%02x)", part);
++        return ESP_ERR_NOT_SUPPORTED;
++    }
++    wr(REG_MODE_CONFIG, 0x40);            /* reset */
++    vTaskDelay(pdMS_TO_TICKS(10));
++    wr(REG_FIFO_CONFIG, 0x5F);            /* average 4, roll over, almost-full at 17 free */
++    wr(REG_SPO2_CONFIG, 0x2F);            /* 4096 nA range, 400 sps, 411 us (18 bit) */
++    wr(REG_LED1_PA, 0x24);                /* red ~7 mA */
++    wr(REG_LED2_PA, 0x24);                /* IR ~7 mA */
++    wr(REG_FIFO_WR_PTR, 0);
++    wr(REG_OVF_COUNTER, 0);
++    wr(REG_FIFO_RD_PTR, 0);
++    err = wr(REG_MODE_CONFIG, 0x03);      /* SpO2 mode: red + IR */
++    if (err != ESP_OK) {
++        return err;
++    }
++    if (xTaskCreatePinnedToCore(ppg_task, "ms_ppg", 4096, NULL, 4, NULL, 0) != pdPASS) {
++        return ESP_ERR_NO_MEM;
++    }
++    ESP_LOGI(TAG, "Pulse sensor MAX3010x found: streaming red+IR at %d Hz", PPG_RATE_HZ);
++    return ESP_OK;
++}
+diff --git a/firmware/esp32-csi-node/main/medisense_ppg.h b/firmware/esp32-csi-node/main/medisense_ppg.h
+new file mode 100644
+index 0000000..5b3c0ef
+--- /dev/null
++++ b/firmware/esp32-csi-node/main/medisense_ppg.h
+@@ -0,0 +1,17 @@
++/**
++ * @file medisense_ppg.h
++ * @brief MediSense: optional MAX30102 / MAX30101 / MAX30105 pulse sensor.
++ *
++ * Wiring (ESP32-S3): sensor SDA -> GPIO8, SCL -> GPIO9, VIN -> 3V3, GND -> GND.
++ * When no sensor answers at boot, nothing runs.
++ */
++#ifndef MEDISENSE_PPG_H
++#define MEDISENSE_PPG_H
++
++#include "esp_err.h"
++
++/** Probe the sensor and, if present, start streaming red + IR samples (100 Hz)
++ *  to the host in batches (UDP, magic 0xC511D0B1). */
++esp_err_t medisense_ppg_init(void);
++
++#endif /* MEDISENSE_PPG_H */
+diff --git a/firmware/esp32-csi-node/main/mmwave_sensor.c b/firmware/esp32-csi-node/main/mmwave_sensor.c
+index 747651c..10810c4 100644
+--- a/firmware/esp32-csi-node/main/mmwave_sensor.c
++++ b/firmware/esp32-csi-node/main/mmwave_sensor.c
+@@ -27,6 +27,8 @@
+ 
+ #include "mmwave_sensor.h"
+ #include "mmwave_detect.h"
++#include "stream_sender.h"   /* MediSense: raw radar frames to the host */
++#include "csi_collector.h"   /* MediSense: node id */
+ 
+ #include <string.h>
+ #include <math.h>
+@@ -45,7 +47,10 @@ static const char *TAG = "mmwave";
+ /* ---- Configuration ---- */
+ #define MMWAVE_UART_NUM           UART_NUM_1
+ #define MMWAVE_MR60_BAUD          115200
++#define MMWAVE_LD6002_BAUD        1382400   /* MediSense: HLK-LD6002 (same TinyFrame protocol as MR60BHA2) */
+ #define MMWAVE_LD2410_BAUD        256000
++#define MEDISENSE_RADAR_MAGIC     0xC511D0A1u
++#define MEDISENSE_RADAR_CHUNK     480       /* bytes of raw UART data per UDP packet */
+ #define MMWAVE_BUF_SIZE           256
+ #define MMWAVE_TASK_STACK         4096
+ #define MMWAVE_TASK_PRIORITY      3
+@@ -70,6 +75,7 @@ static const char *TAG = "mmwave";
+ /* ---- Shared state ---- */
+ static mmwave_state_t s_state;
+ static volatile bool s_running;
++static uint32_t s_tf_baud = MMWAVE_MR60_BAUD;  /* MediSense: baud the TinyFrame sensor answered at */
+ 
+ /* ======================================================================
+  * MR60BHA2 Parser (corrected protocol from Seeed Arduino library)
+@@ -393,7 +399,7 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
+              * 0x0F09) — NOT a bare 0x01 byte. A floating UART1 with no sensor reads
+              * noise full of 0x01s, which the old `buf[i] == MR60_SOF` check mistook
+              * for a real sensor (false "Detected MR60BHA2", #1107). */
+-            if (buf[i] == MR60_SOF && baud == MMWAVE_MR60_BAUD && i + 7 < len) {
++            if (buf[i] == MR60_SOF && (baud == MMWAVE_MR60_BAUD || baud == MMWAVE_LD6002_BAUD) && i + 7 < len) {
+                 const uint8_t *h = &buf[i];
+                 if (mr60_calc_checksum(h, 7) == h[7]) {
+                     uint16_t type = ((uint16_t)h[5] << 8) | h[6];
+@@ -431,6 +437,14 @@ static mmwave_type_t probe_sensor(void)
+     mmwave_type_t result = probe_at_baud(MMWAVE_MR60_BAUD);
+     if (result != MMWAVE_TYPE_NONE) return result;
+ 
++    /* MediSense: the HLK-LD6002 speaks the same TinyFrame protocol at 1382400 baud. */
++    ESP_LOGI(TAG, "Probing at %d baud (LD6002)...", MMWAVE_LD6002_BAUD);
++    result = probe_at_baud(MMWAVE_LD6002_BAUD);
++    if (result != MMWAVE_TYPE_NONE) {
++        s_tf_baud = MMWAVE_LD6002_BAUD;
++        return result;
++    }
++
+     ESP_LOGI(TAG, "Probing at %d baud (LD2410)...", MMWAVE_LD2410_BAUD);
+     result = probe_at_baud(MMWAVE_LD2410_BAUD);
+     return result;
+@@ -444,8 +458,41 @@ static void mmwave_uart_task(void *arg)
+ 
+     uint8_t buf[128];
+ 
++    /* MediSense: forward the sensor's raw byte stream to the host as well,
++     * so it can use every frame type (breathing/heart phase waveforms, not
++     * just the rates parsed here), at the sensor's own pace.
++     * [magic u32][node u8][type u8][len u16][seq u32][dev_ts_us u32][baud u32][bytes] */
++    static uint8_t pkt[20 + MEDISENSE_RADAR_CHUNK];
++    uint16_t fill = 0;
++    uint32_t radar_seq = 0;
++    int64_t first_us = 0;
++    const uint8_t radar_type = (s_state.type == MMWAVE_TYPE_LD2410) ? 2 : 1;
++    const uint32_t radar_baud = (s_state.type == MMWAVE_TYPE_LD2410) ? MMWAVE_LD2410_BAUD : s_tf_baud;
++
+     while (s_running) {
+-        int len = uart_read_bytes(MMWAVE_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
++        int len = uart_read_bytes(MMWAVE_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(50));
++        int64_t now_us = esp_timer_get_time();
++        if (len > 0) {
++            if (fill == 0) first_us = now_us;
++            int room = MEDISENSE_RADAR_CHUNK - fill;
++            int n = len < room ? len : room;
++            memcpy(&pkt[20 + fill], buf, n);
++            fill += n;
++        }
++        if (fill > 0 && (fill >= MEDISENSE_RADAR_CHUNK - (int)sizeof(buf) || now_us - first_us >= 100000)) {
++            uint32_t magic = MEDISENSE_RADAR_MAGIC;
++            uint32_t ts = (uint32_t)first_us;
++            memcpy(&pkt[0], &magic, 4);
++            pkt[4] = csi_collector_get_node_id();
++            pkt[5] = radar_type;
++            memcpy(&pkt[6], &fill, 2);
++            memcpy(&pkt[8], &radar_seq, 4);
++            memcpy(&pkt[12], &ts, 4);
++            memcpy(&pkt[16], &radar_baud, 4);
++            stream_sender_send_priority(pkt, 20 + fill);  /* small, ~10 per second */
++            radar_seq++;
++            fill = 0;
++        }
+         if (len <= 0) {
+             vTaskDelay(1);
+             continue;
+@@ -517,7 +564,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
+         .source_clk = UART_SCLK_DEFAULT,
+     };
+ 
+-    esp_err_t err = uart_driver_install(MMWAVE_UART_NUM, MMWAVE_BUF_SIZE * 2, 0, 0, NULL, 0);
++    esp_err_t err = uart_driver_install(MMWAVE_UART_NUM, 2048, 0, 0, NULL, 0);  /* MediSense: room for 1382400 baud */
+     if (err != ESP_OK) {
+         ESP_LOGE(TAG, "UART driver install failed: %s", esp_err_to_name(err));
+         return err;
+@@ -540,7 +587,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
+ 
+     /* Set final baud rate for the detected sensor. */
+     uint32_t final_baud = (detected == MMWAVE_TYPE_LD2410)
+-                          ? MMWAVE_LD2410_BAUD : MMWAVE_MR60_BAUD;
++                          ? MMWAVE_LD2410_BAUD : s_tf_baud;
+     uart_set_baudrate(MMWAVE_UART_NUM, final_baud);
+ 
+     s_state.type = detected;

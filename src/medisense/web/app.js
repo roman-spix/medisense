@@ -1,5 +1,5 @@
-import { LineChart, WaveChart, BarChart, sparkline, fmtClock } from "/static/charts.js";
-import { BrowserPoseCamera, drawSkeleton } from "/static/posture.js";
+import { LineChart, WaveChart, BarChart, sparkline, fmtClock } from "./charts.js";
+import { BrowserPoseCamera, drawSkeleton } from "./posture.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];

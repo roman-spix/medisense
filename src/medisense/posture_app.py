@@ -24,7 +24,7 @@ from . import notify
 from .config import WEB_DIR, data_dir
 from .posture import PostureTracker
 from .posture_service import PostureService
-from .webutil import dumps, guard, json_body
+from .webutil import add_assets, dumps, guard, json_body, page
 
 log = logging.getLogger("medisense.posture_app")
 
@@ -166,9 +166,7 @@ def _app(request) -> PostureApp:
 
 
 async def index(request):
-    resp = web.FileResponse(WEB_DIR / "posture.html")
-    resp.headers["Cache-Control"] = "no-cache"
-    return resp
+    return page(WEB_DIR / "posture.html")
 
 
 async def ws_handler(request):
@@ -249,8 +247,8 @@ def build(app: PostureApp) -> web.Application:
         web.get("/api/history", api_history),
         web.get("/api/days", api_days),
         web.get("/vendor/mediapipe/{name:.+}", _vendor),
-        web.static("/static", WEB_DIR),
     ])
+    add_assets(w, WEB_DIR)
     return w
 
 

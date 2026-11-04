@@ -170,5 +170,19 @@ async def test_dashboard_files_served(client):
     for path in ("/", "/static/app.js", "/static/charts.js", "/static/posture.js", "/static/style.css"):
         r = await client.get(path)
         assert r.status == 200, path
+
+
+async def test_page_code_cannot_be_stale_after_an_update(client):
+    """0.2.0 let browsers keep old page code after an update (pages stuck at
+    "Starting..."): the page now points at this version's own path."""
+    from medisense import __version__
+
+    html = await (await client.get("/")).text()
+    assert f'/v/{__version__}/app.js' in html and f'/v/{__version__}/style.css' in html
+    assert '"/static/' not in html
+    r = await client.get(f"/v/{__version__}/app.js")
+    assert r.status == 200 and r.headers.get("Cache-Control") == "no-cache"
+    js = await r.text()
+    assert 'from "./charts.js"' in js and 'from "./posture.js"' in js  # follow the versioned path
     r = await client.get("/vendor/mediapipe/../../etc/passwd")
     assert r.status == 404

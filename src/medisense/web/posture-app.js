@@ -1,5 +1,5 @@
-import { LineChart } from "/static/charts.js";
-import { BrowserPoseCamera, drawSkeleton } from "/static/posture.js";
+import { LineChart } from "./charts.js";
+import { BrowserPoseCamera, drawSkeleton } from "./posture.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -79,10 +79,10 @@ function onPosture(m) {
   if (svc.state === "running") note.textContent = "Background camera engine running: works with this page closed.";
   else if (svc.state === "starting") note.textContent = "Starting the camera engine…";
   else if (svc.state === "error") note.textContent = svc.error || "Camera problem.";
-  else if (svc.state === "browser") note.textContent = browserCam && browserCam.running
-    ? "Using this page's camera: keep this page visible (the background engine isn't installed)."
-    : "The background camera engine isn't installed. Click below to use this page's camera instead.";
-  $("#browser-cam").hidden = !(svc.state === "browser" || svc.state === "error") || (browserCam && browserCam.running);
+  else if (svc.state === "browser" && !browserCam) startBrowserCam();
+  else if (svc.state === "browser" && browserCam && note.dataset.kind === "tracking")
+    note.textContent = "Watching with this page's camera. Keep this page open (it can sit behind other windows; don't close it).";
+  $("#browser-cam").hidden = !(svc.state === "browser" || svc.state === "error") || !!(browserCam && browserCam.running);
   if (paused) setPill("warn", "Reminders paused");
   else if (m.state === "drifting") setPill("bad", `Drifting · ${Math.round(sc)}`);
   else if (sc != null) setPill("live", `Aligned · ${Math.round(sc)}`);
@@ -117,19 +117,29 @@ let previewOn = false;
 $("#preview").addEventListener("click", () => {
   previewOn = !previewOn;
   $("#preview").textContent = previewOn ? "Hide camera" : "Show camera";
+  if (browserCam) {  // the page's camera: video under the skeleton, same picture
+    browserCam.showVideo = previewOn;
+    return;
+  }
   $("#preview-img").hidden = !previewOn;
   $("#pose").hidden = previewOn;
-  if (browserCam) browserCam.showVideo = previewOn;
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "preview", on: previewOn }));
 });
-$("#browser-cam").addEventListener("click", () => {
+function startBrowserCam() {
   browserCam = new BrowserPoseCamera({
     canvas: $("#pose"),
+    fps: 3,  // posture changes slowly: 3 checks a second spare an older Mac all day
     onLandmarks: (lm, world, aspect) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "pose", lm, world, aspect })); },
-    onStatus: (kind, msg) => { $("#cam-note").textContent = msg; },
+    onStatus: (kind, msg) => { const n = $("#cam-note"); n.textContent = msg; n.dataset.kind = kind; },
   });
+  browserCam.showVideo = previewOn;
   browserCam.start();
   $("#browser-cam").hidden = true;
+}
+$("#browser-cam").addEventListener("click", () => {
+  if (browserCam) browserCam.stop();
+  browserCam = null;
+  startBrowserCam();
 });
 
 function applySettings(s) {

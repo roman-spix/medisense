@@ -125,9 +125,19 @@ dullness sit up, raise the gaze, brighten attention, shorter sessions.
 
 ## Posture (`posture.py`, `posture_engine.py`, `posture_service.py`)
 
-**Engine.** A separate process in its own environment (`.venv-posture`)
-reads the camera with OpenCV (AVFoundation) and prints landmarks as JSON
-lines in MediaPipe's 33-point layout; it works with the page closed. On a
+**Camera.** By default the page itself runs MediaPipe Pose (lite, on the
+graphics chip via WebGL when possible) on the camera: 6 checks a second in
+MediSense, 3 in MediSense Posture, and about one a second when the page is
+in the background (an active camera keeps Chrome from throttling it
+further). Only the 33 landmark positions go to the local app, which does all
+the scoring. Page code is served under a versioned path (`/v/<version>/`)
+with `no-cache`, so a browser can never mix cached old code with a new page.
+
+**Optional background engine.** Off by default, because on a 2014 MacBook it
+loaded the machine too much. A separate process in its own environment
+(`.venv-posture`) reads the camera with OpenCV (AVFoundation) and prints
+landmarks as JSON lines in MediaPipe's 33-point layout; it works with the
+page closed. On a
 Mac the body is found by Apple's **Vision** framework
 (`VNDetectHumanBodyPoseRequest`, built into macOS 11+) through PyObjC: every
 MediaPipe build still on PyPI imports C++ library functions that macOS only

@@ -245,3 +245,12 @@ def test_meditation_leaning_forward_or_back(tmp_path, dz, expect):
     assert expect in bad
     advice = " ".join(c.advice for c in a.checks if c.key == expect)
     assert ("ignorance" if expect == "tipped_forward" else "pride") in advice  # the Lama's list of errors
+
+
+def test_no_reminders_before_calibration(tmp_path):
+    sent = []
+    tr = PostureTracker(store=tmp_path / "posture.json", notify=lambda *a: sent.append(a))
+    tr.set_settings({"threshold": 95, "hold_s": 3, "cooldown_s": 30})
+    tilted = moved([7], dy=0.10 * SW)  # a tilted head scores under 95 even uncalibrated
+    feed(tr, tilted, 0.0, 10)
+    assert not sent and not tr.calibrated

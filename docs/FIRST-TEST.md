@@ -1,32 +1,36 @@
-# Testing MediSense 0.2 with your board
+# Testing MediSense 0.2.1 with your board
 
 For the setup you have now: the MacBook, the ESP32-S3 board and the webcam
 (no radar or pulse sensor yet). About 40 minutes, including one sitting.
 
-## 1. Download the new version
+## 1. Remove the old version (a clean start)
 
-1. Open [github.com/roman-spix/medisense](https://github.com/roman-spix/medisense),
-   click the green **Code** button, then **Download ZIP**.
-2. Safari unzips it into your **Downloads** folder (a folder named
-   `medisense-main` or similar). If an older `medisense-main` folder is
-   still there, delete it first so the two don't get mixed up.
+1. Close every MediSense Terminal window, and every MediSense tab in your
+   browser.
+2. Download the new version: open
+   [github.com/roman-spix/medisense](https://github.com/roman-spix/medisense),
+   click the green **Code** button, then **Download ZIP**. Safari unzips it
+   into **Downloads**. Delete older `medisense-main` folders there first.
+3. In the new folder, **right-click** `Uninstall MediSense.command`, choose
+   **Open**, then **Open** again. It removes the old program, its Python and
+   the Desktop icons. When it asks about your recordings, just press
+   **Return** to keep them.
 
-## 2. Install the update
+   (Without the folder, the same in Terminal:
+   `rm -rf ~/Applications/MediSense ~/.medisense ~/MediSense/cache; rm -f ~/Desktop/MediSense*.command`)
 
-1. If MediSense is running, close its Terminal window.
-2. Open the new folder in Downloads. **Right-click** `Install MediSense.command`,
-   choose **Open**, then **Open** again (macOS asks because the file came from
-   the internet).
-3. A Terminal window shows the progress for a few minutes. Look for:
-   - `Updating MediSense 0.1.0 → 0.2.0`
-   - `✓ posture engine ready (works in the background, even with the page closed)`
-   - `MediSense 0.2.0 is installed.`
+## 2. Install
 
-   If instead it says `! posture engine not installed`, posture still works
-   through the browser's camera; send me the lines above it.
-4. Your Desktop now has four icons: **MediSense**, **MediSense Demo**,
+1. In the same downloaded folder, **right-click** `Install MediSense.command`,
+   choose **Open**, then **Open** again.
+2. A Terminal window shows the progress for a few minutes, ending with
+   `MediSense 0.2.1 is installed.`
+3. Your Desktop now has four icons: **MediSense**, **MediSense Demo**,
    **MediSense Posture** and **MediSense Pro** (Pro is for the radar and the
    pulse sensor; ignore it for now).
+4. Quick check: double-click **MediSense Demo**. Within a few seconds the
+   badge at the top says **Live · demo**. If a page ever stays at
+   "Starting…", press **⌘⇧R** once to reload it.
 
 ## 3. Update the board
 
@@ -50,10 +54,9 @@ There is no separate installer for the board: MediSense updates it.
 1. Put the board where it was (about 1 m in front of you, the router behind
    you). Leave it plugged into the Mac, so the Board tab can explain any
    interruption.
-2. Tick **Watch my posture with the webcam**, then **Start session**. The
-   first time, macOS asks whether **Terminal** may use the camera: click
-   **OK**. (Missed it? System Preferences → Security & Privacy → Camera, tick
-   Terminal, then close and restart MediSense.)
+2. Tick **Watch my posture with the webcam**, then **Start session**. Your
+   browser asks for the camera: click **Allow**. The camera works inside the
+   page, as in the first version, so keep the page open during the sitting.
 3. Sit in your meditation posture and click **Calibrate** on the Posture card
    (hold still for 5 seconds). Open **The seven-point posture of Vairocana**
    on that card to see each point as Lama Yonten Gyaltso describes it.
@@ -71,17 +74,19 @@ There is no separate installer for the board: MediSense updates it.
 
 ## 5. MediSense Posture at your desk
 
-1. Close MediSense first (its Terminal window): two camera apps at once are
-   heavy for an older MacBook.
-2. Double-click **MediSense Posture**. Its page opens.
+1. Close MediSense first (its Terminal window and page): two camera pages at
+   once are heavy for an older MacBook.
+2. Double-click **MediSense Posture**. Its page opens and asks for the
+   camera: click **Allow**. Chrome works best for this page.
 3. Sit well at the computer: back upright, shoulders relaxed, head over your
    shoulders, hands on the keyboard. Click **Calibrate my posture**.
 4. Click **Send a test notification**. A notification from "Script Editor"
    should appear. If not: System Preferences → Notifications → Script Editor
    → Allow Notifications.
 5. Work as usual. To test it, slump in the chair for half a minute: a
-   reminder names what drifted. You can close the browser page; keep the
-   Terminal window open (minimised is fine). Closing that window stops it.
+   reminder names what drifted. **Keep the page open**: it can sit behind
+   your other windows (it then checks about once a second), but closing it
+   stops the camera. Keep the Terminal window open too (minimised is fine).
 
 ## 6. What to send back
 

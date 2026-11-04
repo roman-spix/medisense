@@ -8,9 +8,12 @@
 #   1. downloads uv (a small, checksum-verified tool) into ~/.medisense/bin
 #   2. uses it to install a private Python 3.12 into ~/.medisense/python
 #   3. installs MediSense and its libraries into this folder (.venv)
-#   4. installs the posture camera engine (Apple Vision + OpenCV) into .venv-posture
-#   5. puts "MediSense", "MediSense Demo", "MediSense Posture" and
+#   4. puts "MediSense", "MediSense Demo", "MediSense Posture" and
 #      "MediSense Pro" (radar + pulse sensor) launchers on your Desktop
+#
+# Posture uses your browser's camera (MediaPipe in the page). A background
+# camera engine exists for testing (MEDISENSE_INSTALL_POSTURE_ENGINE=1) but is
+# off by default: on an older MacBook it was too heavy.
 #
 # Safe to run again at any time (for example after downloading an update).
 # Your recordings live in ~/MediSense and are never touched by this script.
@@ -121,7 +124,7 @@ fi
 say "Installing MediSense and its libraries (a minute or two)"
 # A MediSense still running from this folder would break while its libraries
 # are replaced: close it (start it again from the Desktop afterwards).
-if pkill -f "$APP_DIR/.venv/bin/medisense" 2>/dev/null; then
+if pkill -f "$APP_DIR/\\.venv(-posture)?/bin/" 2>/dev/null; then
   ok "closed the MediSense window that was still running"
   sleep 1
 fi
@@ -141,10 +144,11 @@ fi
 ok "installed into $APP_DIR/.venv"
 
 # ------------------------------------------------------- posture engine
-# Optional: without it, posture still works with the browser's camera (the
-# page must then stay open and visible).
-say "Installing the posture camera engine (about 70 MB)"
+# Off by default: posture runs in the browser page (smooth on an older Mac).
+# Any engine from version 0.2.0 is removed so nothing heavy runs by mistake.
 rm -rf .venv-posture
+if [ "${MEDISENSE_INSTALL_POSTURE_ENGINE:-0}" = 1 ]; then
+say "Installing the background posture camera engine (testing, about 70 MB)"
 "$UV" venv --quiet --python "$PY_VERSION" .venv-posture
 if [ "$OS" = "Darwin" ]; then
   # Apple's Vision framework finds the body (built into macOS 11+); OpenCV reads the camera.
@@ -158,10 +162,11 @@ else
     protobuf==4.25.9 && POSTURE_OK=1
 fi
 if [ "$POSTURE_OK" = 1 ] && .venv-posture/bin/python -I src/medisense/posture_engine.py --check >/dev/null 2>&1; then
-  ok "posture engine ready (works in the background, even with the page closed)"
+  ok "background posture engine ready (used only with MEDISENSE_POSTURE_NATIVE=1)"
 else
   rm -rf .venv-posture
-  printf '  ! posture engine not installed: posture will use the browser camera instead\n'
+  printf '  ! background posture engine not installed\n'
+fi
 fi
 
 # ------------------------------------------------------------ launchers

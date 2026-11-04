@@ -856,23 +856,21 @@ async function openDetail(id) {
   detailStrip();
   const polar = evs.filter((e) => e.kind === "polar_hr").map((e) => [e.t, e.value]);
   const counts = evs.filter((e) => e.kind === "breath_count").map((e) => [e.t, e.value]);
-  detailCharts = [
-    new LineChart($("#d-breath"), { ...CHART_OPTS.breath, xMin: 0 }),
-    new LineChart($("#d-heart"), { ...CHART_OPTS.heart, xMin: 0 }),
-    new LineChart($("#d-motion"), { ...CHART_OPTS.motion, xMin: 0 }),
-    new LineChart($("#d-posture"), { ...CHART_OPTS.posture, xMin: 0 }),
-  ];
   const breathSeries = [{ label: "Breathing", color: "--breath", points: pts("breath_rate"), unit: "/min", gap: 5 }];
   if (counts.length) breathSeries.push({ label: "Your count", color: "--text-secondary", points: counts, dots: true, digits: 0, unit: "/min" });
   const sensor = m.sensor_hr && m.sensor_hr.some((v) => v != null);
-  const heartSeries = sensor
-    ? [{ label: "Pulse sensor", color: "--heart", points: pts("sensor_hr"), digits: 0, unit: "bpm", gap: 5 }]
-    : [{ label: "WiFi estimate (experimental, often wrong)", color: "--text-muted", points: pts("heart_rate_experimental"), digits: 0, unit: "bpm", gap: 5 }];
+  // WiFi's own heart estimate stays out of sight here too: it's too often wrong.
+  const heartSeries = sensor ? [{ label: "Pulse sensor / radar", color: "--heart", points: pts("sensor_hr"), digits: 0, unit: "bpm", gap: 5 }] : [];
   if (polar.length) heartSeries.push({ label: "Polar watch", color: "--heart", points: polar, dots: true, digits: 0, unit: "bpm" });
-  detailCharts[0].set(breathSeries, evMarks);
-  detailCharts[1].set(heartSeries, evMarks);
-  detailCharts[2].set([{ label: "Movement", color: "--motion", points: pts("motion"), unit: "×", gap: 5 }], evMarks);
-  detailCharts[3].set([{ label: "Posture", color: "--posture", points: pts("posture_score"), digits: 0, gap: 5 }], evMarks);
+  const chart = (sel, opts, series) => { const c = new LineChart($(sel), { ...opts, xMin: 0 }); c.set(series, evMarks); return c; };
+  detailCharts = [
+    chart("#d-breath", CHART_OPTS.breath, breathSeries),
+    chart("#d-motion", CHART_OPTS.motion, [{ label: "Movement", color: "--motion", points: pts("motion"), unit: "×", gap: 5 }]),
+    chart("#d-posture", CHART_OPTS.posture, [{ label: "Posture", color: "--posture", points: pts("posture_score"), digits: 0, gap: 5 }]),
+  ];
+  if (heartSeries.length) detailCharts.push(chart("#d-heart", CHART_OPTS.heart, heartSeries));
+  else $("#d-heart").replaceWith(Object.assign(document.createElement("p"), { className: "caption",
+    textContent: "No heart data for this session. WiFi can't measure heart rate reliably: press H during a session to enter your watch's reading, or add a pulse sensor (MediSense Pro)." }));
 
   let rating = meta.rating ?? null;
   $$("#d-rating .chip").forEach((b) => b.addEventListener("click", () => {

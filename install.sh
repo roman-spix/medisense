@@ -9,8 +9,8 @@
 #   2. uses it to install a private Python 3.12 into ~/.medisense/python
 #   3. installs MediSense and its libraries into this folder (.venv)
 #   4. installs the posture camera engine (MediaPipe) into .venv-posture
-#   5. puts "MediSense", "MediSense Demo" and "MediSense Posture" launchers
-#      on your Desktop
+#   5. puts "MediSense", "MediSense Demo", "MediSense Posture" and
+#      "MediSense Pro" (radar + pulse sensor) launchers on your Desktop
 #
 # Safe to run again at any time (for example after downloading an update).
 # Your recordings live in ~/MediSense and are never touched by this script.
@@ -156,7 +156,8 @@ if [ -d "$HOME/Desktop" ]; then
   make_launcher "MediSense" "start"
   make_launcher "MediSense Demo" "demo"
   make_launcher "MediSense Posture" "posture"
-  ok "Desktop launchers: MediSense, MediSense Demo, MediSense Posture"
+  make_launcher "MediSense Pro" "pro"
+  ok "Desktop launchers: MediSense, MediSense Demo, MediSense Posture, MediSense Pro"
 fi
 
 # --------------------------------------------------------- final checks

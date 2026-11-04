@@ -76,7 +76,7 @@ Each folder holds only what the app flashes: the four images,
 the ESP-IDF component versions used, so rebuilds are repeatable.
 
 The build log, resulting `sdkconfig` and `image_info` for the current images
-are on the `firmware-build` branch (run 41826203218); those of the first
+are on the `firmware-build` branch (run 41828027282); those of the first
 images are in commit `bfb3173`. ESP-IDF builds aren't byte-identical, so a
 later rebuild produces different (equivalent) files.
 

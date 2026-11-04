@@ -299,9 +299,10 @@ def cmd_doctor(args) -> int:
                  if info.get("type") == "ok" else f"posture camera engine: {info.get('message') or r.stderr.strip()[-200:]}")
         except Exception as e:
             line(False, f"posture camera engine: {e}")
-    full = assets.asset_dir() / assets.FULL_MODEL_NAME
-    line(None if not full.exists() else True,
-         "background posture model " + ("downloaded" if full.exists() else "not downloaded yet (happens on first camera use)"))
+    if sys.platform != "darwin":
+        full = assets.asset_dir() / assets.FULL_MODEL_NAME
+        line(None if not full.exists() else True,
+             "background posture model " + ("downloaded" if full.exists() else "not downloaded yet (happens on first camera use)"))
     print("\nAll good." if ok else "\nSome checks failed; see above.")
     return 0 if ok else 1
 
@@ -361,12 +362,13 @@ def cmd_fetch_assets(args) -> int:
     from . import assets
 
     code = 0
-    try:
-        assets.fetch_full_model_sync()
-        print(f"Posture model for the background camera engine ready in {assets.asset_dir()}")
-    except Exception as e:
-        print(f"Could not download the posture model now ({e}). It will be retried when you turn the camera on.")
-        code = 1
+    if sys.platform != "darwin":  # on a Mac the engine uses Apple Vision: no model to download
+        try:
+            assets.fetch_full_model_sync()
+            print(f"Posture model for the background camera engine ready in {assets.asset_dir()}")
+        except Exception as e:
+            print(f"Could not download the posture model now ({e}). It will be retried when you turn the camera on.")
+            code = 1
     try:
         assets.fetch_sync()
         print("Posture model for the browser camera ready")

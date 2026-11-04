@@ -183,7 +183,7 @@ if [ -d "$HOME/Desktop" ]; then
 fi
 
 # --------------------------------------------------------- final checks
-say "Downloading the posture models (optional, about 35 MB)"
+say "Downloading the browser's posture model (optional, about 25 MB)"
 .venv/bin/medisense fetch-assets || true
 
 say "Checking the installation"

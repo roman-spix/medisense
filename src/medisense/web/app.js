@@ -774,12 +774,13 @@ const LEAN_UI = {
   laxity: "Leaning towards dullness (laxity)",
   balanced: "Restlessness and dullness in balance",
 };
+// betterUp: true / false, or null for numbers that are observed, not aimed at (breathing).
 function trend(cur, before, betterUp, fmt = (v) => num(v, 0)) {
   if (cur == null || before == null) return "";
   const d = cur - before;
   if (Math.abs(d) < 1e-9 || Math.abs(d) / Math.max(1e-9, Math.abs(before)) < 0.05) return '<span class="trend-flat">→ same as before</span>';
-  const good = (d > 0) === betterUp;
-  return `<span class="${good ? "trend-up" : "trend-down"}">${d > 0 ? "▲" : "▼"} ${fmt(Math.abs(d))} vs before</span>`;
+  const cls = betterUp == null ? "trend-flat" : (d > 0) === betterUp ? "trend-up" : "trend-down";
+  return `<span class="${cls}">${d > 0 ? "▲" : "▼"} ${fmt(Math.abs(d))} vs before</span>`;
 }
 async function loadProfile() {
   const p = await api("/api/profile").catch(() => null);
@@ -795,7 +796,7 @@ async function loadProfile() {
       ${tile("Steady", p.steady_pct == null ? "--" : `${num(p.steady_pct, 0)}%`, trend(p.steady_pct, p.steady_pct_before, true, (v) => `${num(v, 0)} pts`) || "of your time sitting")}
       ${tile("Time to settle", mins(p.settle_s), trend(p.settle_s, p.settle_s_before, false, (v) => fmtClock(v)) || "median")}
       ${tile("Longest still", mins(p.longest_still_s), "median per session")}
-      ${tile("Breathing while steady", num(p.steady_breath), trend(p.steady_breath, p.steady_breath_before, false, (v) => num(v, 1)) || "breaths / min")}
+      ${tile("Breathing while steady", num(p.steady_breath), trend(p.steady_breath, p.steady_breath_before, null, (v) => num(v, 1)) || "breaths / min, breathe naturally")}
       ${tile("Restless · drowsy", `${num(p.restless_per10, 1)} · ${p.drowsiness_measured ? num(p.drowsy_per10, 1) : "--"}`, "times per 10 min")}
     </div>` : ""}
     <ul class="profile-advice">${(p.advice || []).map((a) => `<li>${esc(a)}</li>`).join("")}</ul>

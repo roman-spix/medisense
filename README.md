@@ -150,7 +150,9 @@ specific suggestions. Each session's detail view has a timeline of these
 states. The sensors see the body, not the mind: treat this as a mirror for
 the conditions of practice; your own notes and ratings remain the real record.
 
-![Session detail](docs/img/session.png)
+![Where you are now and progress (sample data)](docs/img/history.png)
+
+![Session detail (sample data)](docs/img/session.png)
 
 ## MediSense Posture (all day)
 
@@ -164,6 +166,8 @@ for Script Editor (System Preferences → Notifications). To have it start at
 login, add **MediSense Posture.command** in System Preferences → Users &
 Groups → Login Items.
 
+![MediSense Posture](docs/img/posture.png)
+
 ## MediSense Pro
 
 With an HLK-LD6002 radar and a MAX30102 pulse sensor wired to the board
@@ -173,6 +177,8 @@ the next time it's plugged in. You get an exact heart rate, heart-rate
 variability (RMSSD, SDNN), **coherence** (how much of your heart rhythm follows
 one slow rhythm, usually your breathing) and radar breathing. MediSense uses
 the best source for each number.
+
+![MediSense Pro (simulated sensors)](docs/img/pro.png)
 
 ## 6. Your data
 

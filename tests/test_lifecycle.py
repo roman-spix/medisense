@@ -51,7 +51,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(device, "identify", fake_identify)
     monkeypatch.setattr(device, "flash_board", fake_flash)
     monkeypatch.setattr(device, "SerialMonitor", FakeMonitor)
-    monkeypatch.setattr(device.network, "local_ip", lambda towards="8.8.8.8": state["ip"])
+    monkeypatch.setattr(device.network, "lan_ip", lambda peer=None, max_age=0.0: state["ip"])
+    monkeypatch.setattr(device.network, "firewall_state", lambda program: state.get("firewall"))
     monkeypatch.setattr(device.network, "current_ssid", lambda: "Home")
     monkeypatch.setattr(device.network, "router_bssid_24ghz", lambda ssid: "a4:2b:b0:01:02:0f")
     monkeypatch.setattr(device.network, "firewall_blocks_incoming", lambda: False)
@@ -197,3 +198,52 @@ async def test_old_esp32_rejected(env, monkeypatch):
     env["ports"] = [PORT]
     await mgr._poll()
     assert mgr.state == "unsupported" and "ESP32-S3" in mgr.message
+
+
+async def test_board_sending_elsewhere_is_repointed(env):
+    """The board reports where it sends its data; if that isn't this Mac
+    (address changed, or a VPN was on at setup), MediSense corrects it once."""
+    reg = DeviceRegistry()
+    mgr = DeviceManager(reg, lambda: None, lambda: env["data_at"])
+    mgr._loop = asyncio.get_running_loop()
+    env["ports"] = [PORT]
+    await mgr._poll()
+    await mgr.setup("Home", "correct horse battery")
+    await wait_for(lambda: mgr.state == "starting")
+    elsewhere = [*BOOT[:3], "I (4100) main: CSI streaming active -> 10.8.0.2:5005 (edge_tier=0)"]
+    feed(mgr, *elsewhere)
+    await wait_for(lambda: len(env["flashes"]) == 2 and mgr.state == "starting")
+    assert env["flashes"][1]["full"] is False
+    assert reg.get(CHIP.mac)["settings"]["target_ip"] == "192.168.1.23"
+    feed(mgr, *elsewhere)  # still wrong after that: no loop of re-flashing
+    await asyncio.sleep(0.3)
+    assert len(env["flashes"]) == 2
+
+
+async def test_no_data_says_which_side(env):
+    reg = DeviceRegistry()
+    mgr = DeviceManager(reg, lambda: None, lambda: env["data_at"])
+    mgr._loop = asyncio.get_running_loop()
+    env["ports"] = [PORT]
+    await mgr._poll()
+    await mgr.setup("Home", "correct horse battery")
+    await wait_for(lambda: mgr.state == "starting")
+    mgr.filter_fallback_done = True  # (tested above)
+    feed(mgr, *BOOT, "I (5000) csi_collector: MediSense firmware 3: frames from the router")
+    mgr._started_at -= 30
+    stats = "I (15000) csi_collector: medisense stats: heard={} used={} to_board=0 other=0 foreign=0 rate_drop=0 any_sender=0"
+
+    feed(mgr, stats.format(0, 0))
+    mgr._check_health()
+    assert "doesn't pick up any WiFi frames" in mgr.message
+
+    feed(mgr, stats.format(900, 480))
+    mgr._check_health()
+    assert "sends its data to 192.168.1.23, but nothing arrives" in mgr.message
+    assert "isolation" in mgr.message
+
+    env["firewall"] = "app_blocked"
+    mgr._fw_checked = (-1e9, None)
+    mgr._check_health()
+    assert "firewall" in mgr.message and "python3.12" in mgr.message
+    assert mgr.snapshot()["board_medisense"] == "3"

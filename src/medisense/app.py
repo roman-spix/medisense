@@ -429,7 +429,7 @@ class MediSenseApp:
             "board_events": self.board_events[-8:],
             "camera_on": self.camera_on,
             "seconds_since_data": None if self.last_packet < 0 else round(now - self.last_packet, 1),
-            "mac_ip": network.local_ip() if not self.demo else "127.0.0.1",
+            "mac_ip": network.lan_ip(self.device.log.board_ip, max_age=30) if not self.demo else "127.0.0.1",
             "device": dev,
             "session": None if not self.session else {
                 "id": self.session.id,

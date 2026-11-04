@@ -260,7 +260,7 @@ def cmd_doctor(args) -> int:
         line(True, "can build board settings")
     except Exception as e:
         line(False, f"cannot build board settings: {e}")
-    ip = network.local_ip()
+    ip = network.lan_ip()
     line(bool(ip), f"this computer's network address: {ip or 'none (not connected?)'}")
     ssid = network.current_ssid()
     line(None if not ssid else True, f"WiFi network: {ssid or 'unknown'}")

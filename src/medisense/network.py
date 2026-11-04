@@ -4,11 +4,13 @@ network it's on, and the router's 2.4 GHz radio address (BSSID).
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 
 AIRPORT = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
@@ -48,12 +50,92 @@ def local_ip(towards: str = "8.8.8.8") -> str | None:
         s.close()
 
 
+_wifi_dev: tuple[float, str | None] = (-1e9, None)
+
+
 def wifi_device() -> str | None:
+    global _wifi_dev
     if sys.platform != "darwin":
         return None
+    if time.monotonic() - _wifi_dev[0] < 300:
+        return _wifi_dev[1]
     out = _run(["networksetup", "-listallhardwareports"])
     m = re.search(r"Hardware Port: (?:Wi-Fi|AirPort)\s*\nDevice: (\S+)", out)
-    return m.group(1) if m else "en0"
+    _wifi_dev = (time.monotonic(), m.group(1) if m else "en0")
+    return _wifi_dev[1]
+
+
+def parse_ifconfig(out: str) -> list[tuple[str, str]]:
+    """(interface, "ip/prefix") for each IPv4 address in macOS `ifconfig` output.
+
+    Point-to-point tunnels (VPNs: "inet 10.8.0.2 --> 10.8.0.1") and loopback
+    are left out: nothing on the WiFi can send to those.
+    """
+    addrs, dev = [], None
+    for line in out.splitlines():
+        m = re.match(r"^([A-Za-z0-9_.-]+):\s", line)
+        if m:
+            dev = m.group(1)
+            continue
+        m = re.search(r"\binet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-fA-F]{8})", line)
+        if m and dev and not m.group(1).startswith("127."):
+            addrs.append((dev, f"{m.group(1)}/{bin(int(m.group(2), 16)).count('1')}"))
+    return addrs
+
+
+def parse_ip_addr(out: str) -> list[tuple[str, str]]:
+    """The same from Linux `ip -4 -o addr show`."""
+    addrs = []
+    for line in out.splitlines():
+        m = re.search(r"^\d+:\s+(\S+)\s+inet (\d+\.\d+\.\d+\.\d+/\d+)", line)
+        if m and not m.group(2).startswith("127.") and " peer " not in line:
+            addrs.append((m.group(1), m.group(2)))
+    return addrs
+
+
+def interface_addresses() -> list[tuple[str, str]]:
+    if sys.platform == "darwin":
+        return parse_ifconfig(_run(["/sbin/ifconfig"]))
+    if shutil.which("ip"):
+        return parse_ip_addr(_run(["ip", "-4", "-o", "addr", "show"]))
+    return []
+
+
+def pick_lan_ip(addrs: list[tuple[str, str]], peer: str | None, wifi: str | None) -> str | None:
+    """The address on the same subnet as `peer`, else the WiFi interface's."""
+    if peer:
+        try:
+            p = ipaddress.ip_address(peer)
+        except ValueError:
+            p = None
+        for _, a in addrs:
+            iface = ipaddress.ip_interface(a)
+            if p is not None and iface.network.prefixlen < 32 and p in iface.network:
+                return str(iface.ip)
+    for dev, a in addrs:
+        if dev == wifi:
+            return a.split("/")[0]
+    return None
+
+
+_lan_cache: dict = {}
+
+
+def lan_ip(peer: str | None = None, max_age: float = 0.0) -> str | None:
+    """This computer's address as seen by a device on the local network.
+
+    Not the route to the internet (`local_ip()`): with a VPN on, that is the
+    tunnel's address, and a board sending there never reaches this Mac. With
+    `peer` (the board's address) the address on the board's subnet wins, then
+    the WiFi interface's, then the default route's.
+    """
+    hit = _lan_cache.get(peer)
+    if max_age and hit and time.monotonic() - hit[0] < max_age:
+        return hit[1]
+    ip = pick_lan_ip(interface_addresses(), peer, wifi_device())
+    ip = ip or (local_ip(peer) if peer else None) or local_ip()
+    _lan_cache[peer] = (time.monotonic(), ip)
+    return ip
 
 
 def current_ssid() -> str | None:
@@ -153,3 +235,27 @@ def firewall_enabled() -> bool | None:
     if "disabled" in out.lower():
         return False
     return None
+
+
+def firewall_app_blocked(path: str) -> bool | None:
+    """True if the firewall blocks incoming connections for this program."""
+    if sys.platform != "darwin":
+        return None
+    out = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getappblocked", path]).lower()
+    if "block" in out:
+        return True
+    if "permit" in out or "allow" in out:
+        return False
+    return None
+
+
+def firewall_state(program: str) -> str | None:
+    """"block_all", "app_blocked", "on" (can't tell for this program) or None (not in the way)."""
+    if firewall_blocks_incoming():
+        return "block_all"
+    if not firewall_enabled():
+        return None
+    blocked = firewall_app_blocked(program)
+    if blocked:
+        return "app_blocked"
+    return None if blocked is False else "on"

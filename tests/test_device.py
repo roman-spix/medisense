@@ -192,7 +192,7 @@ async def test_known_board_with_old_firmware_is_updated(tmp_path, monkeypatch, s
 
     monkeypatch.setattr(device, "identify", fake_identify)
     monkeypatch.setattr(device, "load_wifi_password", lambda ssid: "secret123" if saved_password else None)
-    monkeypatch.setattr(device.network, "local_ip", lambda *a: "192.168.1.21")
+    monkeypatch.setattr(device.network, "lan_ip", lambda *a, **k: "192.168.1.21")
     monkeypatch.setattr(device.network, "current_ssid", lambda: "Home")
     calls = []
 
@@ -208,3 +208,49 @@ async def test_known_board_with_old_firmware_is_updated(tmp_path, monkeypatch, s
         assert s.ssid == "Home" and s.password == "secret123" and s.target_ip == "192.168.1.21"
     else:
         assert not calls and dm.state == "needs_setup" and "update" in dm.message
+
+
+def test_board_log_medisense_stats(monkeypatch):
+    from medisense import device
+
+    clock = iter([100.0, 110.0])
+    monkeypatch.setattr(device.time, "monotonic", lambda: next(clock))
+    b = BoardLog()
+    b.feed("I (312) main: ESP32-S3 CSI Node (ADR-018 / ADR-110) - v0.8.8 - Node ID: 1")
+    b.feed("I (5000) csi_collector: MediSense firmware 3: frames from the router, MGMT+DATA capture")
+    assert b.medisense_fw == "3" and b.hears() is None and not b.sending
+    b.feed("I (15000) csi_collector: medisense stats: heard=1200 used=400 to_board=390 other=10 foreign=800 rate_drop=5 any_sender=0")
+    assert b.hears()["used"] == 400 and b.hears()["heard_per_s"] is None and b.sending
+    b.feed("I (25000) csi_collector: medisense stats: heard=2400 used=900 to_board=880 other=20 foreign=1500 rate_drop=9 any_sender=1")
+    h = b.hears()
+    assert h["heard_per_s"] == 120.0 and h["used_per_s"] == 50.0 and h["any_sender"]
+    b.feed("I (312) main: ESP32-S3 CSI Node (ADR-018 / ADR-110) - v0.8.8 - Node ID: 1")  # rebooted
+    assert b.hears() is None and b.medisense_fw is None
+
+
+def test_lan_address_is_the_one_the_board_can_reach():
+    """With a VPN on, the route to the internet leads into the tunnel; the
+    board must be given the Mac's address on its own network."""
+    from medisense.network import parse_ifconfig, parse_ip_addr, pick_lan_ip
+
+    ifconfig = """lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+\tinet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+\tether 8c:85:90:aa:bb:cc
+\tinet 192.168.1.5 netmask 0xffffff00 broadcast 192.168.1.255
+en5: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+\tinet 10.0.0.7 netmask 0xffffff00 broadcast 10.0.0.255
+utun2: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1400
+\tinet 10.8.0.2 --> 10.8.0.1 netmask 0xffffffff
+""".replace("\\t", "\t")
+    addrs = parse_ifconfig(ifconfig)
+    assert addrs == [("en0", "192.168.1.5/24"), ("en5", "10.0.0.7/24")]
+    assert pick_lan_ip(addrs, "192.168.1.7", "en0") == "192.168.1.5"
+    assert pick_lan_ip(addrs, "10.0.0.9", "en0") == "10.0.0.7"
+    assert pick_lan_ip(addrs, None, "en0") == "192.168.1.5"
+    assert pick_lan_ip(addrs, "172.16.0.9", "en9") is None
+    linux = """1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever
+3: wlan0    inet 192.168.1.5/24 brd 192.168.1.255 scope global dynamic wlan0\\       valid_lft 85000sec
+7: tun0    inet 10.8.0.2 peer 10.8.0.1/32 scope global tun0\\       valid_lft forever
+"""
+    assert parse_ip_addr(linux) == [("wlan0", "192.168.1.5/24")]

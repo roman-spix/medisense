@@ -254,3 +254,67 @@ def test_no_reminders_before_calibration(tmp_path):
     tilted = moved([7], dy=0.10 * SW)  # a tilted head scores under 95 even uncalibrated
     feed(tr, tilted, 0.0, 10)
     assert not sent and not tr.calibrated
+
+
+async def test_tracking_can_be_stopped_and_started(papp):
+    app = papp.pa
+    sent = []
+    app.tracker.notify = lambda *a: sent.append(a)
+    r = await papp.post("/api/tracking", json={"on": False}, headers=H)
+    st = await r.json()
+    assert st["tracking"] is False and st["posture"]["state"] == "stopped"
+    async with papp.ws_connect("/ws") as ws:
+        first = await ws.receive_json()
+        assert first["tracking"] is False
+        for _ in range(6):  # frames sent while stopped are ignored
+            await ws.send_json({"type": "pose", "lm": POSE["lm"], "world": POSE["world"], "aspect": ASPECT})
+        await asyncio.sleep(0.2)
+    assert app.tracker.current["score"] is None and app.tracker.current["state"] == "stopped"
+    app._flush_log(force=True)
+    from medisense.posture_app import posture_dir
+    assert not list(posture_dir().glob("*.csv"))  # nothing recorded while stopped
+    r = await papp.post("/api/tracking", json={"on": True}, headers=H)
+    st = await r.json()
+    assert st["tracking"] is True and st["tracking_since"]
+    async with papp.ws_connect("/ws") as ws:
+        await ws.receive_json()
+        for _ in range(6):
+            await ws.send_json({"type": "pose", "lm": POSE["lm"], "world": POSE["world"], "aspect": ASPECT})
+        for _ in range(100):
+            if app.tracker.current.get("score") is not None:
+                break
+            await asyncio.sleep(0.02)
+    assert app.tracker.current["score"] is not None
+
+
+def test_day_stats(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDISENSE_HOME", str(tmp_path / "home"))
+    from medisense import posture_app
+
+    rows = ["time,score,visible,worst,alerts,mode"]
+    t = 9 * 3600
+    def add(n, score, worst="", alerts=0):
+        nonlocal t
+        for _ in range(n):
+            rows.append(f"{t // 3600:02d}:{t % 3600 // 60:02d}:{t % 60:02d},{score},1.0,{worst},{alerts},desk")
+            t += 10
+    add(30, 92)                       # 5 min upright
+    add(12, 70, "slouch", 1)          # 2 min slumping
+    add(6, 74, "head_forward", 2)     # 1 min head forward
+    add(18, 90, "", 2)                # 3 min upright
+    t += 3600                         # an hour away (gap)
+    add(24, 88, "", 1)                # 4 min upright after a restart (its own alert count)
+    rows.append(f"{t // 3600:02d}:{t % 3600 // 60:02d}:00,,0.0,,1,desk")  # away: not counted
+    (posture_app.posture_dir() / "2026-11-04.csv").write_text("\n".join(rows) + "\n")
+    d = posture_app.read_day("2026-11-04", threshold=80)
+    assert d["minutes_tracked"] == 15.0
+    assert d["aligned_pct"] == round(100 * 72 / 90, 1)
+    assert d["longest_upright_min"] == 5.0
+    assert d["drifting_min"] == 3.0
+    assert [(i["key"], i["minutes"]) for i in d["issues"]] == [("slouch", 2.0), ("head_forward", 1.0)]
+    assert d["issues"][0]["name"] == "Slumping in the chair"
+    assert d["alerts"] == 3  # 2 before the restart + 1 after
+    assert d["first"] == "09:00" and d["last"] == "10:14"  # the away row at 10:15 has no score
+    stricter = posture_app.read_day("2026-11-04", threshold=91)
+    assert stricter["aligned_pct"] < d["aligned_pct"]
+    assert posture_app.read_day("2026-11-05")["minutes_tracked"] == 0

@@ -80,10 +80,14 @@ jobs:
           done
           kill %1 || true
           [ "${ok:-}" = 1 ]
-      - name: Posture camera engine loads (MediaPipe on this Mac)
+      - name: Posture camera engine (Apple Vision) finds a body in a photo
         run: |
           test -x .venv-posture/bin/python
           .venv-posture/bin/python -I src/medisense/posture_engine.py --check
+          curl -fsSL -o portrait.jpg https://storage.googleapis.com/mediapipe-assets/portrait.jpg
+          echo "a6f11efaa834706db23f275b6115058fa87fc7f14362681e6abe14e82749de3e  portrait.jpg" | shasum -a 256 -c -
+          .venv-posture/bin/python -I src/medisense/posture_engine.py --image portrait.jpg --frames 2 < /dev/null > pose.jsonl
+          .venv/bin/python .github/check_vision_pose.py pose.jsonl tests/data/pose_upright.json
           .venv/bin/medisense fetch-assets
       - name: Posture app serves its page and state
         run: |

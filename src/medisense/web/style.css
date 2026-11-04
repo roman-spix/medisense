@@ -311,3 +311,6 @@ details.settings[open] summary { margin-bottom: 8px; }
 .rhythm { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
 .wave.short { height: 110px; }
 @media (max-width: 720px) { .rhythm { grid-template-columns: 1fr; } }
+.brand-sub { font-size: 13px; font-weight: 400; color: var(--text-secondary); margin-left: 4px; }
+.pt-how { color: var(--text-muted); }
+.points.compact .pt { padding: 6px 0; }

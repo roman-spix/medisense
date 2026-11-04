@@ -35,6 +35,7 @@ SESSION_ALERTS = AlertSettings(threshold=80.0, hold_s=30.0, cooldown_s=300.0, so
 LIVE_S = 2.5  # data within this long: live
 PAUSED_S = 10.0  # up to this long: "signal paused", not a disconnection
 PACER_HZ = 50
+PACER_ONLY_BELOW_FPS = 35.0  # the board's self-ping already delivers ~40-50 frames/s when all is well
 PACER_PORT = 9  # discard port: the board doesn't listen, it only needs to receive frames
 
 # What the board's log says about an unexpected interruption (diagnostics).
@@ -170,6 +171,11 @@ class MediSenseApp:
                     nxt = time.monotonic()
                 target = self.packet_source or self.device.log.board_ip
                 if not target or time.monotonic() - self.last_packet > PAUSED_S:
+                    continue
+                # Only while the board's own gateway pings leave the stream thin:
+                # each pacer packet also makes the board send back an "unreachable"
+                # reply, airtime that is wasted when frames already flow.
+                if (self.metrics.get("frames_per_s") or 0.0) >= PACER_ONLY_BELOW_FPS:
                     continue
                 try:
                     sock.sendto(b"MS", (target, PACER_PORT))

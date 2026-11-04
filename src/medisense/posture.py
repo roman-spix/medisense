@@ -1,22 +1,31 @@
-"""Posture scoring against the seven-point posture of Vairocana.
+"""Posture scoring, in two flavours.
 
-Works on MediaPipe Pose landmarks (33 points, image-normalised x/y/z with
-visibility, plus "world" coordinates in metres), wherever they come from: the
-native background camera engine or the browser.
+* **Meditation** (MediSense sessions): the seven-point posture of Vairocana
+  as Lama Yonten Gyaltso teaches it in "Nectar of Liberation" (Нектар
+  освобождения, 2018), in his order:
 
-The seven points and what a camera in front of you can check:
+  1. Legs       vajra (lotus) posture, or at least simply cross-legged
+  2. Hands      palms four finger-widths below the navel, right on left,
+                thumb tips joined at the navel
+  3. Back       fully straight
+  4. Shoulders  open and level; no stooping
+  5. Head       chin lowered, lightly drawn in towards the throat
+  6. Tongue     touching the palate                     (not visible to a camera)
+  7. Gaze       down along the line of the nose, eyes half-closed, steady,
+                not looking around                      (head turning is checked)
 
-1. Legs crossed (vajra / half-lotus)        - only if the knees are in view; info only
-2. Hands in the meditation mudra             - wrists together, low, centred (if in view)
-3. Spine straight "like an arrow"            - no sideways lean, no slouch, not tipped forward
-4. Shoulders level and open                  - level, not hunched up towards the ears
-5. Neck slightly bent, chin a little tucked  - head neither dropping nor raised, not pushed forward, level
-6. Eyes gazing down past the nose            - not checked by the camera
-7. Tongue to the palate, jaw relaxed         - not checked by the camera
+  plus his list of errors: leaning right, left, forward or back.
 
-Absolute rules (level shoulders, level head, no sideways lean) need no
-setup. Relative rules (head height, chin, shoulders up, slouch, head forward)
-compare with *your* best posture, captured once with "Calibrate".
+* **Office** (MediSense Posture, all day at the computer): hands and legs are
+  free for the keyboard; it watches only a healthy working posture: back
+  upright (no slumping, no leaning in), shoulders relaxed and level, head
+  over the shoulders (not pushed towards the screen, not hanging), sitting
+  centred.
+
+Both work on MediaPipe Pose landmarks (33 points, image-normalised, plus
+"world" coordinates in metres), from the background camera engine or the
+browser. Level checks work without setup; the rest compare with *your* good
+posture, captured once with "Calibrate" (separately for each flavour).
 """
 
 from __future__ import annotations
@@ -42,7 +51,7 @@ MODES = ("meditation", "desk")
 @dataclass
 class Check:
     key: str
-    point: str  # which of the seven points
+    point: str  # which point of the posture (see POINTS)
     status: str  # ok / minor / major / not_visible / needs_calibration / not_checked / off
     penalty: float = 0.0
     value: float | None = None
@@ -55,6 +64,7 @@ class Assessment:
     checks: list[Check]
     visible: bool
     calibrated: bool
+    mode: str = "meditation"
 
     @property
     def worst(self) -> list[Check]:
@@ -68,6 +78,7 @@ class Assessment:
             "calibrated": self.calibrated,
             "checks": [asdict(c) for c in self.checks],
             "advice": [c.advice for c in self.worst[:2]],
+            "points": summarize_points(self.checks, self.mode),
         }
 
 
@@ -169,18 +180,53 @@ def _status(p: float) -> str:
     return "ok" if p <= 0 else ("minor" if p < 10 else "major")
 
 
+# The points each flavour shows, in order: (key, name, what it asks for).
+POINTS = {
+    "meditation": [  # Lama Yonten Gyaltso, "Nectar of Liberation": the seven-point posture of Vairocana
+        ("legs", "Legs", "Vajra (lotus) posture, or at least simply cross-legged"),
+        ("hands", "Hands", "Palms four finger-widths below the navel, right on left, thumb tips joined at the navel"),
+        ("back", "Back", "Fully straight"),
+        ("shoulders", "Shoulders", "Open and level; no stooping"),
+        ("head", "Head", "Chin lowered, lightly drawn in towards the throat"),
+        ("tongue", "Tongue", "Touching the palate"),
+        ("gaze", "Gaze", "Down along the line of the nose, eyes half-closed, steady on one point"),
+    ],
+    "desk": [  # a healthy working posture at the computer
+        ("back", "Back upright", "Sit tall, supported; no slumping and no leaning in towards the screen"),
+        ("shoulders", "Shoulders relaxed and level", "Down and back, not hunched up or dropped to one side"),
+        ("head", "Head over the shoulders", "Ears above the shoulders, not pushed towards the screen or hanging down"),
+        ("centre", "Sitting centred", "Not leaning to one side or propped on an elbow; head level"),
+    ],
+}
+STATUS_RANK = {"major": 6, "minor": 5, "needs_calibration": 4, "ok": 3, "not_visible": 2, "not_checked": 1, "off": 0}
+
+
+def summarize_points(checks: list[Check], mode: str) -> list[dict]:
+    """One line per point of the posture: its worst check, for the pages."""
+    out = []
+    for key, name, how in POINTS.get(mode, POINTS["meditation"]):
+        mine = [c for c in checks if c.point == key]
+        worst = max(mine, key=lambda c: (STATUS_RANK.get(c.status, 0), c.penalty), default=None)
+        out.append({
+            "key": key, "name": name, "how": how,
+            "status": worst.status if worst else "not_visible",
+            "advice": worst.advice if worst is not None and worst.penalty > 0 else "",
+        })
+    return out
+
+
 def assess(m: dict, calibration: dict | None, mode: str = "meditation") -> Assessment:
-    """Score one (smoothed) set of measures against the Vairocana points."""
+    """Score one (smoothed) set of measures: Vairocana ("meditation") or office ("desk")."""
     cal = calibration or {}
-    if not m.get("visible"):
-        return Assessment(None, [], False, bool(cal))
-    checks: list[Check] = []
     desk = mode == "desk"
+    if not m.get("visible"):
+        return Assessment(None, [], False, bool(cal), mode)
+    checks: list[Check] = []
     m = dict(m)
     for k in LEVEL_KEYS:
         if m.get(k) is not None and cal.get(k) is not None:
             m[k] = m[k] - cal[k]
-    # absolute shifts since calibration, in shoulder widths
+    # absolute shifts since calibration, in shoulder widths (+ = moved down)
     sw0 = cal.get("shoulder_width") or m.get("shoulder_width") or 1.0
     shoulders_up = nose_down = None
     if cal.get("shoulder_y") is not None and m.get("shoulder_y") is not None:
@@ -194,37 +240,73 @@ def assess(m: dict, calibration: dict | None, mode: str = "meditation") -> Asses
             return None, "needs_calibration"
         return m[key], "ok"
 
-    # 3. Spine straight like an arrow
+    BACK = "back"
+    SIDE = "centre" if desk else "back"  # leaning sideways: its own point at the desk, the back in meditation
+
+    # -- leaning sideways (both); Lama Yonten Gyaltso: right stirs anger, left desire
     if m.get("lean") is not None:
         p = _pen(m["lean"], 3.0, 3.0, 25)
         side = "left" if m["lean"] > 0 else "right"
-        checks.append(Check("lean", "spine", _status(p), p, round(m["lean"], 1),
-                            f"Straighten your spine like an arrow: you're leaning to your {side}."))
+        adv = (f"Sit centred: you're leaning to your {side}." if desk else
+               f"You're leaning to your {side}: come back to the centre. "
+               + ("(Leaning left stirs desire and attachment.)" if side == "left" else "(Leaning right stirs anger.)"))
+        checks.append(Check("lean", SIDE, _status(p), p, round(m["lean"], 1), adv))
     else:
         p = _pen(m["head_offset"], 0.07, 150.0, 15)
         side = "left" if m["head_offset"] > 0 else "right"
-        checks.append(Check("head_over_spine", "spine", _status(p), p, round(m["head_offset"], 3),
-                            f"Bring your head back over the centre of your spine (it's drifting {side})."))
+        checks.append(Check("head_over_spine", SIDE, _status(p), p, round(m["head_offset"], 3),
+                            f"Bring your head back over the middle of your body (it's drifting to your {side})."))
+
+    # -- slouching
     v, st = rel("torso_height")
     if v is not None:
         drop = 1 - v / cal["torso_height"]
         p = _pen(drop * 100, 4.0, 2.0, 30) if drop > 0 else 0.0
-        checks.append(Check("slouch", "spine", _status(p), p, round(drop, 3),
-                            "Lift through the spine, like a stack of coins: you're slouching."))
-    elif st == "needs_calibration":
-        checks.append(Check("slouch", "spine", st))
+        checks.append(Check("slouch", BACK, _status(p), p, round(drop, 3),
+                            "Sit up tall: you're slumping." if desk else "Straighten your back fully: you're slouching."))
+    elif shoulders_up is not None and desk:
+        # hips out of view (usual at a desk): sliding down in the chair lowers
+        # both the shoulders and the head in the picture
+        sink = min(-shoulders_up, nose_down)
+        p = _pen(sink * 100, 5.0, 2.5, 30) if sink > 0 else 0.0
+        checks.append(Check("slouch", BACK, _status(p), p, round(sink, 3), "Sit up tall: you're slumping in the chair."))
+    elif st == "needs_calibration" or (desk and shoulders_up is None):
+        checks.append(Check("slouch", BACK, "needs_calibration"))
+
+    # -- tipped forward / leaning back. With depth (MediaPipe world landmarks,
+    # hips in view): how far the shoulders are in front of the hips (smaller z
+    # = closer to the camera). Without (Apple Vision gives 2-D points): the
+    # upper body's size in the picture, which grows when you lean towards the
+    # camera and shrinks when you lean back.
+    fwd_adv = ("Sit back in your chair: you're leaning in towards the screen." if desk else
+               "You're leaning forward: sit upright. (Leaning forward stirs ignorance, even when the mind seems quiet.)")
+    back_adv = "You're leaning back: bring the body upright. (Leaning back stirs pride.)"
+    fwd = back = None
     v, st = rel("torso_forward")
     if v is not None:
-        d = v - cal["torso_forward"]  # negative = shoulders came towards the camera
-        p = _pen(min(0.0, d), 0.03, 400.0, 25)
-        checks.append(Check("tipped_forward", "spine", _status(p), p, round(d, 3),
-                            "Sit back over your sitting bones: your upper body is tipping forward."))
+        d = v - cal["torso_forward"]  # + = the shoulders came towards the camera
+        fwd = _pen(max(0.0, d), 0.03, 400.0, 25)
+        back = _pen(max(0.0, -d), 0.04, 300.0, 20)
+        value = round(d, 3)
+    elif m.get("shoulder_width") and cal.get("shoulder_width"):
+        scale = m["shoulder_width"] / cal["shoulder_width"] - 1
+        fwd = _pen(max(0.0, scale) * 100, 8.0 if desk else 6.0, 2.5, 25)
+        back = _pen(max(0.0, -scale) * 100, 8.0, 2.0, 20)
+        value = round(scale, 3)
+    if fwd is not None:
+        if desk:
+            back = 0.0  # reclining a little at a desk is fine
+        if fwd >= back:
+            checks.append(Check("tipped_forward", BACK, _status(fwd), fwd, value, fwd_adv))
+        else:
+            checks.append(Check("leaning_back", BACK, _status(back), back, value, back_adv))
 
-    # 4. Shoulders level and open
+    # -- shoulders: level, relaxed (open)
     p = _pen(m["shoulder_roll"], 2.5, 3.0, 20)
     side = "left" if m["shoulder_roll"] > 0 else "right"
     checks.append(Check("shoulders_level", "shoulders", _status(p), p, round(m["shoulder_roll"], 1),
-                        f"Level your shoulders: your {side} shoulder is lower."))
+                        f"Level your shoulders: your {side} shoulder is lower."
+                        + (" Leaning on one elbow?" if desk else "")))
     head_drop = None
     if m.get("head_height") is not None and cal.get("head_height"):
         head_drop = 1 - m["head_height"] / cal["head_height"]
@@ -237,72 +319,77 @@ def assess(m: dict, calibration: dict | None, mode: str = "meditation") -> Asses
             head_drop = max(0.0, nose_down) * 0.8
         p = _pen(shrug * 100, 4.0, 2.5, 20)
         checks.append(Check("shoulders_relaxed", "shoulders", _status(p), p, round(shrug, 3),
-                            "Let your shoulders drop and open, like a vulture's wings."))
+                            "Let your shoulders drop: they're creeping up towards your ears." if desk else
+                            "Open your shoulders and let them settle; don't hunch."))
     else:
         checks.append(Check("shoulders_relaxed", "shoulders", "needs_calibration"))
 
-    # 5. Neck slightly bent, chin a little tucked
+    # -- head
     if head_drop is not None:
-        p = _pen(head_drop * 100, 6.0 if not desk else 10.0, 2.2, 35) if head_drop > 0 else 0.0
+        p = _pen(head_drop * 100, 10.0 if desk else 6.0, 2.2, 35) if head_drop > 0 else 0.0
         checks.append(Check("head_drop", "head", _status(p), p, round(head_drop, 3),
-                            "Your head is dropping: lift through the crown. (Often a sign of dullness: brighten your attention.)"))
+                            "Lift your head: looking down a lot strains the neck. If it keeps happening, raise the screen to eye level."
+                            if desk else
+                            "Your head is sinking: lift through the crown. (A sinking head often comes with dullness: brighten your attention.)"))
     else:
         checks.append(Check("head_drop", "head", "needs_calibration"))
     v, st = rel("head_pitch")
     if v is not None:
         d = v - cal["head_pitch"]
         if d > 0:
-            p = _pen(d, 0.08 if not desk else 0.15, 120.0, 25)
-            adv = "Chin too far down: keep it only slightly tucked."
+            p = _pen(d, 0.15 if desk else 0.08, 120.0, 25)
+            adv = ("Chin down a lot: bring your head up to neutral." if desk else
+                   "Chin too far down: lower it only slightly, lightly drawn in.")
         else:
-            p = _pen(d, 0.06, 150.0, 25)
-            adv = "Tuck your chin slightly: your head is tilted back."
+            p = _pen(d, 0.10 if desk else 0.06, 150.0, 25)
+            adv = ("Your chin is up: bring the head back to neutral." if desk else
+                   "Lower your chin, drawing it lightly in towards the throat.")
         checks.append(Check("chin", "head", _status(p), p, round(d, 3), adv))
+    fwd_adv = ("Bring your head back over your shoulders: it's drifting towards the screen." if desk else
+               "Bring your head back over your shoulders.")
     if m.get("head_forward") is not None and cal.get("head_forward") is not None:
         d = m["head_forward"] - cal["head_forward"]
-        p = _pen(max(0.0, d), 0.03, 300.0, 20)
-        checks.append(Check("head_forward", "head", _status(p), p, round(d, 3),
-                            "Bring your head back over your shoulders."))
+        p = _pen(max(0.0, d), 0.04 if desk else 0.03, 300.0, 25)
+        checks.append(Check("head_forward", "head", _status(p), p, round(d, 3), fwd_adv))
     elif m.get("face_size") is not None and cal.get("face_size"):
         d = m["face_size"] / cal["face_size"] - 1
-        p = _pen(max(0.0, d) * 100, 6.0, 2.0, 20)
-        checks.append(Check("head_forward", "head", _status(p), p, round(d, 3),
-                            "Bring your head back over your shoulders."))
+        p = _pen(max(0.0, d) * 100, 10.0 if desk else 6.0, 2.0, 25)
+        checks.append(Check("head_forward", "head", _status(p), p, round(d, 3), fwd_adv))
     if m.get("head_roll") is not None:
         p = _pen(m["head_roll"], 3.0, 2.5, 20)
         side = "left" if m["head_roll"] > 0 else "right"
-        checks.append(Check("head_level", "head", _status(p), p, round(m["head_roll"], 1),
+        checks.append(Check("head_level", SIDE if desk else "head", _status(p), p, round(m["head_roll"], 1),
                             f"Your head is tilted to your {side}: bring it level."))
-    if m.get("head_yaw") is not None:
-        p = _pen(m["head_yaw"], 0.12, 60.0, 10)
-        checks.append(Check("face_forward", "head", _status(p), p, round(m["head_yaw"], 3), "Face straight ahead."))
 
-    # 2. Hands in the meditation mudra (meditation mode, when the hands are in view)
-    if desk:
-        checks.append(Check("hands", "hands", "off"))
-        checks.append(Check("legs", "legs", "off"))
-    else:
+    if not desk:
+        # gaze: the eyes can't be seen well enough, but looking around turns the head
+        if m.get("head_yaw") is not None:
+            p = _pen(m["head_yaw"], 0.12, 60.0, 10)
+            checks.append(Check("face_forward", "gaze", _status(p), p, round(m["head_yaw"], 3),
+                                "Keep the gaze steady, down along the line of the nose; don't look around."))
+        else:
+            checks.append(Check("face_forward", "gaze", "not_visible"))
+        # hands: four finger-widths below the navel, right on left, thumbs joined
         if m.get("wrist_gap") is not None:
             p = 0.0
             p += 4.0 if m["wrist_gap"] > 0.8 else 0.0
             p += 3.0 if m["wrist_low"] < 1.2 else 0.0
             p += 3.0 if m["wrist_centre"] > 0.35 else 0.0
             checks.append(Check("hands", "hands", _status(p), p, round(m["wrist_gap"], 2),
-                                "Rest your hands in your lap, right on left, thumbs lightly touching."))
+                                "Rest the palms four finger-widths below the navel, right on left, thumb tips joined."))
         else:
             checks.append(Check("hands", "hands", "not_visible"))
-        # 1. Legs: information only
+        # legs: information only
         if m.get("knee_spread") is not None and m.get("hip_width"):
             crossed = m["knee_spread"] > 1.4 * m["hip_width"]
             checks.append(Check("legs", "legs", "ok" if crossed else "minor", 0.0, round(m["knee_spread"], 2),
-                                "" if crossed else "Cross your legs, knees resting low and wide."))
+                                "" if crossed else "Sit in the vajra posture, or at least cross your legs."))
         else:
             checks.append(Check("legs", "legs", "not_visible"))
-    checks.append(Check("eyes", "eyes", "not_checked"))
-    checks.append(Check("jaw", "mouth", "not_checked"))
+        checks.append(Check("tongue", "tongue", "not_checked"))
 
     total = min(100.0, sum(c.penalty for c in checks))
-    return Assessment(100.0 - total, checks, True, bool(cal))
+    return Assessment(100.0 - total, checks, True, bool(cal), mode)
 
 
 # --------------------------------------------------------------- live tracker
@@ -352,7 +439,8 @@ class PostureTracker:
         self._calib: list | None = None
         self._calib_until = 0.0
         self.current: dict = {"score": None, "visible": False, "calibrated": self.calibrated,
-                              "checks": [], "advice": [], "state": "waiting"}
+                              "checks": [], "advice": [], "state": "waiting",
+                              "points": summarize_points([], self.settings.mode), "mode": self.settings.mode}
         self._bad_since: float | None = None
         self._good_since: float | None = None
         self._last_alert = -1e9
@@ -447,7 +535,8 @@ class PostureTracker:
             self._finish_calibration()
         if not self._hist or t - self._last_seen > 3.0:
             self.current = {"score": None, "visible": False, "calibrated": self.calibrated, "checks": [],
-                            "advice": [], "state": "away" if self._last_seen > 0 else "waiting"}
+                            "advice": [], "state": "away" if self._last_seen > 0 else "waiting",
+                            "points": summarize_points([], self.settings.mode), "mode": self.settings.mode}
             self._bad_since = None
             return self.current
         smooth = _median_measures([h for _, h in self._hist])

@@ -58,8 +58,9 @@ def test_upright_scores_high_once_calibrated(tmp_path):
     cur, _ = feed(tr, LM, t, 3)
     assert cur["score"] >= 90
     assert cur["state"] in ("aligned", "ok")
-    points = {c["point"] for c in cur["checks"]}
-    assert {"spine", "shoulders", "head", "hands", "eyes", "mouth"} <= points
+    # the seven points as Lama Yonten Gyaltso lists them, in his order
+    assert [p["key"] for p in cur["points"]] == ["legs", "hands", "back", "shoulders", "head", "tongue", "gaze"]
+    assert next(p for p in cur["points"] if p["key"] == "tongue")["status"] == "not_checked"
 
 
 @pytest.mark.parametrize("name,lm,expect", [
@@ -87,9 +88,10 @@ def test_uncalibrated_runs_level_checks_only():
     a = assess(measure(LM, None, ASPECT), None, "meditation")
     statuses = {c.key: c.status for c in a.checks}
     assert statuses["head_drop"] == "needs_calibration"
-    assert statuses["eyes"] == "not_checked"
-    desk = {c.key: c.status for c in assess(measure(LM, None, ASPECT), None, "desk").checks}
-    assert desk["hands"] == "off" and desk["legs"] == "off"
+    assert statuses["tongue"] == "not_checked"
+    desk = assess(measure(LM, None, ASPECT), None, "desk").as_dict()
+    assert [p["key"] for p in desk["points"]] == ["back", "shoulders", "head", "centre"]
+    assert not any(c["key"] in ("hands", "legs", "tongue", "face_forward") for c in desk["checks"])
 
 
 def test_nobody_in_view():
@@ -183,3 +185,63 @@ async def test_posture_app_api(papp):
     assert r.status == 403  # no header: refused
     for path in ("/", "/static/posture-app.js", "/static/posture.js"):
         assert (await papp.get(path)).status == 200
+
+
+# ------------------------------------------------------------- office (desk)
+
+def desk_tracker(tmp_path, lm=LM):
+    tr = PostureTracker(store=tmp_path / "posture.json")
+    tr.set_settings({"mode": "desk"})
+    tr.start_calibration(1.0)
+    t0 = tr._calib_until - 1.0
+    for i in range(12):
+        tr.update(lm, None, ASPECT, t=t0 + i * 0.25)
+    assert tr.calibrated
+    return tr, t0 + 3.0
+
+
+def without_hips(lm):
+    out = lm.copy()
+    out[[23, 24, 25, 26, 27, 28], 3] = 0.0  # below the desk edge, out of view
+    return out
+
+
+def test_desk_ignores_hands(tmp_path):
+    tr, t = desk_tracker(tmp_path)
+    typing = moved([15], dx=0.3, dy=-0.2)  # one hand off on the mouse, the other high
+    cur, _ = feed(tr, typing, t, 3)
+    assert cur["score"] >= 90 and worst(cur) is None
+
+
+def test_desk_slump_without_hips_in_view(tmp_path):
+    lm = without_hips(LM)
+    tr, t = desk_tracker(tmp_path, lm)
+    slumped = moved(FACE + SH, dy=0.15 * SW, lm=lm)  # sliding down in the chair
+    cur, _ = feed(tr, slumped, t, 3)
+    assert worst(cur) == "slouch" and cur["score"] < 85
+    back = next(p for p in cur["points"] if p["key"] == "back")
+    assert back["status"] in ("minor", "major") and "slump" in back["advice"]
+
+
+def test_desk_leaning_in_towards_the_screen_without_depth(tmp_path):
+    lm = without_hips(LM)
+    tr, t = desk_tracker(tmp_path, lm)
+    centre = lm[[11, 12], :2].mean(axis=0)
+    closer = lm.copy()
+    closer[:, :2] = centre + (lm[:, :2] - centre) * 1.2  # the whole upper body 20 % bigger
+    cur, _ = feed(tr, closer, t, 3)
+    assert any(c["key"] == "tipped_forward" and c["penalty"] > 0 for c in cur["checks"])
+    assert "screen" in " ".join(cur["advice"])
+
+
+@pytest.mark.parametrize("dz,expect", [(-0.10, "tipped_forward"), (0.10, "leaning_back")])
+def test_meditation_leaning_forward_or_back(tmp_path, dz, expect):
+    world = np.array(POSE["world"], dtype=float)
+    cal = measure(LM, world, ASPECT)
+    w2 = world.copy()
+    w2[[11, 12], 2] += dz  # smaller z = closer to the camera
+    a = assess(measure(LM, w2, ASPECT), {k: v for k, v in cal.items() if k != "visible"}, "meditation")
+    bad = {c.key for c in a.checks if c.penalty > 0}
+    assert expect in bad
+    advice = " ".join(c.advice for c in a.checks if c.key == expect)
+    assert ("ignorance" if expect == "tipped_forward" else "pride") in advice  # the Lama's list of errors

@@ -125,29 +125,48 @@ dullness sit up, raise the gaze, brighten attention, shorter sessions.
 
 ## Posture (`posture.py`, `posture_engine.py`, `posture_service.py`)
 
-**Engine.** A separate process in its own environment (`.venv-posture`:
-MediaPipe 0.10.21, NumPy 1.26, OpenCV 4.9, the last with Intel-Mac wheels for
-macOS 11) reads the camera at 4 fps (AVFoundation), runs Pose Landmarker
-(full model) and prints landmarks as JSON lines. It works with the page
-closed. Without it, the page's camera runs MediaPipe (lite) and sends the
-same landmarks; scoring is identical. Video never leaves the engine except
-as an optional small preview while you look at it; nothing is stored.
+**Engine.** A separate process in its own environment (`.venv-posture`)
+reads the camera with OpenCV (AVFoundation) and prints landmarks as JSON
+lines in MediaPipe's 33-point layout; it works with the page closed. On a
+Mac the body is found by Apple's **Vision** framework
+(`VNDetectHumanBodyPoseRequest`, built into macOS 11+) through PyObjC: every
+MediaPipe build still on PyPI imports C++ library functions that macOS only
+has from 12.3 (e.g. `std::stringbuf` move-assignment, libc++ 12), so it can't
+load on Big Sur. Every compiled file of the Mac engine (PyObjC 10.3.1, NumPy
+1.26.4, OpenCV 4.8.1.78) was checked to need macOS 11.0 or older, and CI
+compares its landmarks on a test photo with MediaPipe's. Vision gives 2-D
+points: distance from the camera is judged by the size of the face and the
+shoulders in the picture. On Linux the engine uses MediaPipe Pose Landmarker
+(full). If the engine can't run, the page's own camera (MediaPipe in the
+browser) takes over automatically; scoring is identical. Video never leaves
+the engine except as an optional small preview while you look at it; nothing
+is stored.
 
-**Scoring** against the seven points of the Vairocana posture: spine (no
-sideways lean, no slouch: torso height vs calibration, not tipped forward),
-shoulders (level, relaxed: a shrug raises the shoulders while the nose stays,
-a head drop lowers the nose while the shoulders stay), head (not dropping,
-chin slightly tucked, not pushed forward, level, facing ahead), hands (mudra:
-wrists together, low, centred, meditation mode), legs (information only),
-eyes and mouth (not checked). Level checks compare with your calibration
+**Two scorings.** *Meditation* (MediSense) follows the seven-point posture
+of Vairocana as Lama Yonten Gyaltso teaches it in *Nectar of Liberation*, in
+his order: 1 legs (vajra posture or cross-legged; information only, when in
+view), 2 hands (palms four finger-widths below the navel, right on left,
+thumbs joined: wrists together, low, centred), 3 back (fully straight: no
+slouch; and his four errors, leaning right, left, forward or back, each with
+the affliction he says it stirs), 4 shoulders (open and level: level, not
+hunched; a shrug raises the shoulders while the nose stays, a head drop lowers
+the nose while the shoulders stay), 5 head (chin lowered, lightly drawn in:
+pitch vs calibration; not sinking, not pushed forward, level), 6 tongue (not
+visible to a camera), 7 gaze (down along the nose, eyes half-closed, steady:
+the eyes aren't checked, but the head turning away is). *Office* (MediSense
+Posture) checks only a healthy working posture with the hands and legs free:
+back upright (slumping: torso height, or with the hips out of view both the
+shoulders and the head sinking; leaning in towards the screen), shoulders
+relaxed and level, head over the shoulders (not pushed towards the screen,
+not hanging; looser limits for glancing at the keyboard), sitting centred. Level checks compare with your calibration
 (bodies and cameras are rarely level); penalties under one point are ignored.
 Score = 100 − penalties, smoothed over 2 s. Reminders when the score stays
 below the threshold for the hold time, at most once per cooldown (MediSense
 during sessions: below 80 for 30 s, every 5 min; MediSense Posture: below 80
 for 20 s, every 3 min). Nods (the chin dropping fast and coming back) and
 slumps (head 15 % lower for 15 s) become session events and feed "drowsy".
-Calibrations are shared between the two apps (`~/MediSense/posture.json`),
-settings are kept per app. Notifications use `osascript` (shown as Script
+Calibrations are kept per scoring in `~/MediSense/posture.json`, settings
+per app. Notifications use `osascript` (shown as Script
 Editor).
 
 ## MediSense Pro (`pro.py`)
@@ -170,7 +189,8 @@ breathing) rate.
 
 **Best source:** heart rate from the pulse sensor (≥ 60 % clean beats), else
 the radar; breathing from the radar, else WiFi, else the heart's breathing
-rhythm (coherence ≥ 0.3).
+rhythm (coherence ≥ 0.3). Breathing numbers are observations, never targets:
+the practice instruction is to breathe naturally.
 
 ## Device lifecycle (`device.py`)
 

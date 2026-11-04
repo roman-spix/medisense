@@ -4,7 +4,8 @@ See your breathing, stillness and posture while you meditate, without wearing
 anything, and see where your practice is going. A small ESP32-S3 board (about
 $15) listens to how your home WiFi signal bends around your body
 ([RuView](https://github.com/ruvnet/RuView) WiFi sensing); the webcam checks
-your posture against the seven points of the Vairocana posture. Your Mac turns
+your posture against the seven-point posture of Vairocana, as Lama Yonten
+Gyaltso teaches it in *Nectar of Liberation*. Your Mac turns
 that into live numbers in the browser, records every session, and shows how
 quickly you settle, how much of each sitting is steady, and whether
 restlessness or dullness is your main obstacle.
@@ -16,7 +17,7 @@ Three apps share one install:
 | App | What it's for |
 |---|---|
 | **MediSense** | Meditation sessions: breathing, stillness, posture, practice insights |
-| **MediSense Posture** | All-day posture reminders (macOS notifications), camera in the background |
+| **MediSense Posture** | Posture reminders while you work at the computer (macOS notifications): back, shoulders and head; camera in the background |
 | **MediSense Pro** | MediSense plus a 60 GHz radar and a pulse sensor: exact heart rate, heart-rate variability, coherence |
 
 Everything stays on your Mac. Nothing is uploaded anywhere, and camera images
@@ -62,7 +63,7 @@ administrator password and installs nothing system-wide:
 
 - it moves MediSense to `~/Applications/MediSense`
 - it installs its own private Python, leaving the Mac's old one alone
-- it installs the posture camera engine (MediaPipe) for background posture
+- it installs the posture camera engine (Apple's own body-pose recognition, built into macOS 11 and later)
 - it puts four icons on your Desktop: **MediSense**, **MediSense Demo**,
   **MediSense Posture** and **MediSense Pro**
 
@@ -111,7 +112,11 @@ the board's own log.
 - The first time with the camera, sit in your best posture and click
   **Calibrate** on the Posture card: MediSense then measures drift from *your*
   posture. If you drift for 30 seconds, a gentle macOS notification names
-  what to correct (adjustable under "Reminders during meditation").
+  what to correct (adjustable under "Reminders during meditation"). The card's
+  **The seven-point posture of Vairocana** list follows Lama Yonten Gyaltso's
+  description: legs, hands, back, shoulders, head, tongue, gaze, plus his
+  four errors (leaning right, left, forward or back). The camera can't see the
+  tongue or the eyes, but it notices the head turning when the gaze wanders.
 - During the session:
   - **Mark moment** (key **M**): note when something happened, such as
     drowsiness, a breakthrough or a distraction.
@@ -141,7 +146,9 @@ Heart and breathing numbers alone don't say how your practice is going. The
 - **Longest still** stretch, and how often you were **restless** (fidgeting,
   the body's side of agitation) or **drowsy** (the head dropping or nodding,
   the body's side of dullness).
-- **Breathing while steady**, which usually slows as practice deepens.
+- **Breathing while steady**: observed, not a goal. It tends to slow by
+  itself as the body settles; breathe naturally, without forcing, slowing or
+  speeding it.
 
 **Where you are now** compares your last seven sessions with the seven before:
 a stage (Building the habit → Settling the body → Steadying → Stable sitting),
@@ -154,17 +161,29 @@ the conditions of practice; your own notes and ratings remain the real record.
 
 ![Session detail (sample data)](docs/img/session.png)
 
-## MediSense Posture (all day)
+## MediSense Posture (at the computer)
 
-Double-click **MediSense Posture**. It watches your posture with the camera in
-the background (the page can be closed; keep the Terminal window open or
-minimised) and sends a macOS notification when your posture stays below your
-threshold (default: below 80 for 20 seconds, at most every 3 minutes). Choose
-**Meditation** or **Desk** mode, calibrate once, and see your day as a chart.
-The first time, macOS asks to allow the camera for Terminal and notifications
-for Script Editor (System Preferences → Notifications). To have it start at
-login, add **MediSense Posture.command** in System Preferences → Users &
-Groups → Login Items.
+For working at your desk, not for meditation: your hands and legs are free
+(typing, the mouse, crossed legs all fine). It watches only what makes a
+healthy working posture:
+
+- **Back upright**: no slumping down in the chair, no leaning in towards the
+  screen
+- **Shoulders relaxed and level**: not creeping up towards the ears, not
+  dropped to one side (leaning on an elbow)
+- **Head over the shoulders**: not pushed towards the screen, not hanging down
+- **Sitting centred**: not leaning to one side, head level
+
+Double-click **MediSense Posture**. Sit well at your desk once and click
+**Calibrate my posture**; it then measures drift from that. It runs with the
+camera in the background (the page can be closed; keep the Terminal window
+open or minimised) and sends a macOS notification when your posture stays
+below your threshold (default: below 80 for 20 seconds, at most every 3
+minutes; all adjustable), and draws your day as a chart. The first time,
+macOS asks to allow the camera for Terminal and notifications for Script
+Editor (System Preferences → Notifications). To have it start at login, add
+**MediSense Posture.command** in System Preferences → Users & Groups → Login
+Items. Recalibrate after moving the laptop or the chair.
 
 ![MediSense Posture](docs/img/posture.png)
 
@@ -208,7 +227,7 @@ Deleting a session in the app moves it to `~/MediSense/trash`.
 | "On WiFi but no data reaches this Mac" | Same WiFi on the Mac? macOS firewall: System Preferences → Security & Privacy → Firewall. Allow Python, or turn off "Block all incoming connections". |
 | Signal "Weak" | Move the board closer to the router, away from metal and other electronics. |
 | Breathing shows "--" for long | Sit still. Move the board so your chest is between it and the router. |
-| Camera posture doesn't start | System Preferences → Security & Privacy → Camera: allow **Terminal** (background engine). Without the engine, posture uses the browser's camera: allow it when the browser asks. |
+| Camera posture doesn't start | System Preferences → Security & Privacy → Camera: allow **Terminal** (background engine), then quit and restart MediSense. If the engine can't run, posture switches to the browser's camera by itself: allow it when the browser asks, and keep that page visible. |
 | No posture notifications | System Preferences → Notifications → **Script Editor** → Allow Notifications. Test it with **Send a test notification** in MediSense Posture. |
 | Data keeps pausing | Plug the board into the Mac during a session: the Board tab's **Interruptions** list then says why (WiFi drop with a reason code, power dip, restart). |
 | macOS asks if "python3.12" may accept incoming connections | Click **Allow**: that's the board's data arriving. |
@@ -217,8 +236,10 @@ Run a self-check any time in Terminal: `~/Applications/MediSense/.venv/bin/medis
 
 ## 8. Updating and removing
 
-**Update:** download the new ZIP and run `install.sh` from it again, the same way
-as installing. Your recordings and board setup are kept.
+**Update:** download the new ZIP and run the installer from it again, the same
+way as installing; it says "Updating MediSense 0.1.0 → 0.2.0". Your
+recordings and board setup are kept, and the board's firmware is updated the
+next time you plug it in. Step by step: [docs/FIRST-TEST.md](docs/FIRST-TEST.md).
 
 **Remove:** delete `~/Applications/MediSense`, `~/.medisense` and the four
 Desktop icons. Your recordings stay in `~/MediSense` until you delete that too.
@@ -249,13 +270,18 @@ bash install.sh                    # or: uv venv && uv pip install -e ".[dev]"
 Layout: `src/medisense/` (Python app), `src/medisense/web/` (pages, no build
 step), `firmware/` (prebuilt RuView firmware, the MediSense patches and how it
 was built), `tests/`. The posture camera engine runs in its own environment
-(`.venv-posture`, `requirements-posture-macos.txt`).
+(`.venv-posture`, `requirements-posture-macos.txt`): Apple Vision through PyObjC
+on a Mac (every compiled file checked to run on macOS 11), MediaPipe on Linux.
 
 ## Credits and licences
 
 - [RuView](https://github.com/ruvnet/RuView) (MIT): the ESP32 CSI firmware.
 - [MediaPipe](https://github.com/google-ai-edge/mediapipe) (Apache-2.0): camera
-  pose (the background engine and the browser fallback).
+  pose in the browser fallback and on Linux. On a Mac, Apple's Vision framework
+  through [PyObjC](https://github.com/ronaldoussoren/pyobjc) (MIT) and
+  [OpenCV](https://opencv.org) (Apache-2.0).
+- The meditation posture follows Lama Yonten Gyaltso, *Nectar of Liberation*
+  (Нектар освобождения), Buddhist centre "Kalachakra", 2018.
 - [esptool](https://github.com/espressif/esptool) (GPL-2.0-or-later): used as a
   separate program to install the firmware. Check its licence terms before
   shipping MediSense commercially.

@@ -8,7 +8,7 @@
 #   1. downloads uv (a small, checksum-verified tool) into ~/.medisense/bin
 #   2. uses it to install a private Python 3.12 into ~/.medisense/python
 #   3. installs MediSense and its libraries into this folder (.venv)
-#   4. installs the posture camera engine (MediaPipe) into .venv-posture
+#   4. installs the posture camera engine (Apple Vision + OpenCV) into .venv-posture
 #   5. puts "MediSense", "MediSense Demo", "MediSense Posture" and
 #      "MediSense Pro" (radar + pulse sensor) launchers on your Desktop
 #
@@ -30,8 +30,12 @@ die() { printf '\n\033[31mInstallation stopped:\033[0m %s\n' "$*" >&2; exit 1; }
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 [ -f pyproject.toml ] && grep -q 'name = "medisense"' pyproject.toml || die "run this script from inside the MediSense folder."
-
-say "Installing MediSense"
+NEW_VERSION="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+# the version already installed (handed on when the script restarts itself from ~/Applications)
+OLD_VERSION="${MEDISENSE_OLD_VERSION:-}"
+if [ -z "$OLD_VERSION" ] && [ -f "$HOME/Applications/MediSense/pyproject.toml" ]; then
+  OLD_VERSION="$(grep -m1 '^version = ' "$HOME/Applications/MediSense/pyproject.toml" | cut -d'"' -f2)"
+fi
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 if [ "$OS" = "Darwin" ]; then
@@ -50,15 +54,27 @@ case "$APP_DIR" in
   "$HOME/Downloads"/*|"$HOME/Desktop"/*)
     if [ "$OS" = "Darwin" ] && [ ! -d "$APP_DIR/.git" ]; then
       DEST="$HOME/Applications/MediSense"
-      say "Moving MediSense to $DEST (so it doesn't live in Downloads)"
+      say "Copying MediSense $NEW_VERSION to $DEST (so it doesn't live in Downloads)"
       mkdir -p "$DEST"
-      # copy everything except a previous environment
-      (cd "$APP_DIR" && tar cf - --exclude ./.venv .) | (cd "$DEST" && tar xf -)
+      # Replace the program files exactly (old files that the new version no
+      # longer has are removed); the environments are rebuilt below and your
+      # recordings live elsewhere (~/MediSense), so nothing of yours is touched.
+      if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete --exclude /.venv --exclude /.venv-posture "$APP_DIR"/ "$DEST"/
+      else
+        (cd "$APP_DIR" && tar cf - --exclude ./.venv --exclude ./.venv-posture .) | (cd "$DEST" && tar xf -)
+      fi
       ok "copied; you can delete the downloaded folder afterwards"
-      exec bash "$DEST/install.sh"
+      MEDISENSE_OLD_VERSION="${OLD_VERSION:-none}" exec bash "$DEST/install.sh"
     fi
     ;;
 esac
+
+if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "none" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  say "Updating MediSense $OLD_VERSION → $NEW_VERSION (your recordings and board setup are kept)"
+else
+  say "Installing MediSense $NEW_VERSION"
+fi
 
 # ------------------------------------------------------------------ uv
 mkdir -p "$TOOLS/bin"
@@ -103,6 +119,12 @@ fi
 
 # ------------------------------------------------------------ libraries
 say "Installing MediSense and its libraries (a minute or two)"
+# A MediSense still running from this folder would break while its libraries
+# are replaced: close it (start it again from the Desktop afterwards).
+if pkill -f "$APP_DIR/.venv/bin/medisense" 2>/dev/null; then
+  ok "closed the MediSense window that was still running"
+  sleep 1
+fi
 rm -rf .venv
 "$UV" venv --quiet --python "$PY_VERSION" .venv
 ok "$(.venv/bin/python -V)"
@@ -121,10 +143,11 @@ ok "installed into $APP_DIR/.venv"
 # ------------------------------------------------------- posture engine
 # Optional: without it, posture still works with the browser's camera (the
 # page must then stay open and visible).
-say "Installing the posture camera engine (MediaPipe, about 60 MB)"
+say "Installing the posture camera engine (about 70 MB)"
 rm -rf .venv-posture
 "$UV" venv --quiet --python "$PY_VERSION" .venv-posture
 if [ "$OS" = "Darwin" ]; then
+  # Apple's Vision framework finds the body (built into macOS 11+); OpenCV reads the camera.
   POSTURE_OK=0
   "$UV" pip install --quiet --python .venv-posture/bin/python --no-deps --require-hashes \
     --only-binary :all: -r requirements-posture-macos.txt && POSTURE_OK=1
@@ -161,7 +184,7 @@ if [ -d "$HOME/Desktop" ]; then
 fi
 
 # --------------------------------------------------------- final checks
-say "Downloading the posture models (optional, about 35 MB)"
+say "Downloading the browser's posture model (optional, about 25 MB)"
 .venv/bin/medisense fetch-assets || true
 
 say "Checking the installation"
@@ -169,7 +192,7 @@ say "Checking the installation"
 
 cat <<DONE
 
-$(printf '\033[1m')MediSense is installed.$(printf '\033[0m')
+$(printf '\033[1m')MediSense $NEW_VERSION is installed.$(printf '\033[0m')
 
   • Double-click "MediSense" on your Desktop to start (it opens in your browser).
   • No board yet? Double-click "MediSense Demo" to try it with a simulated meditator.

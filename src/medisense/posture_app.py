@@ -1,5 +1,7 @@
-"""MediSense Posture: a separate app that only watches your posture and
-reminds you (macOS notification) when it drifts from the Vairocana posture.
+"""MediSense Posture: a separate app for working at the computer. It watches
+your back, shoulders and head (hands and legs stay free for the keyboard)
+and reminds you with a macOS notification when you slump, hunch or lean in
+towards the screen. (The Vairocana check lives in MediSense, for sessions.)
 
 Runs in the background with the camera (native engine, works while the page
 is closed or hidden), keeps a daily history in ~/MediSense/posture/, and
@@ -42,7 +44,9 @@ class PostureApp:
         self.clients: set[web.WebSocketResponse] = set()
         self.preview_clients: set[web.WebSocketResponse] = set()
         self.tracker = PostureTracker(store=data_dir() / "posture.json", notify=self._notify)
-        self.service = PostureService(self.tracker, on_update=self._on_update, on_preview=self._on_preview)
+        self.tracker.settings.mode = "desk"  # office posture only
+        # Posture changes slowly: 2 frames a second spares an old Mac's battery all day.
+        self.service = PostureService(self.tracker, on_update=self._on_update, on_preview=self._on_preview, fps=2.0)
         self.paused = False
         self._acc: list[tuple[float | None, str | None]] = []
         self._next_log = time.monotonic() + LOG_EVERY_S
@@ -213,7 +217,7 @@ async def api_settings(request):
     app = _app(request)
     if "paused" in d:
         app.paused = bool(d.pop("paused"))
-    app.tracker.set_settings(d)
+    app.tracker.set_settings({**d, "mode": "desk"})
     return web.json_response(app.state(), dumps=dumps)
 
 

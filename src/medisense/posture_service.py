@@ -2,8 +2,9 @@
 
 Used by MediSense (meditation sessions) and MediSense Posture (all-day
 posture reminders). The engine is a separate process using the posture
-environment (.venv-posture); if that isn't installed, pages fall back to the
-browser camera and send landmarks here instead (same scoring either way).
+environment (.venv-posture): Apple Vision on a Mac, MediaPipe elsewhere. If
+it isn't installed or can't run, pages fall back to the browser camera and
+send landmarks here instead (same scoring either way).
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ class PostureService:
         self.last_lm = None
         self._want = False
         self._preview = False
+        self._fatal_kind: str | None = None
 
     # -- control ------------------------------------------------------------
 
@@ -102,22 +104,24 @@ class PostureService:
 
     async def _run(self) -> None:
         backoff = 2.0
+        engine_failures = 0
         while self._want:
             self.state, self.source, self.error = "starting", "native", None
-            try:
-                model = await assets.ensure_pose_model()
-            except Exception as e:
-                self.state, self.error = "error", f"Could not download the posture model: {e}"
-                await asyncio.sleep(30)
-                continue
-            py = posture_python()
             extra = []
+            if sys.platform != "darwin":  # Apple Vision needs no model file
+                try:
+                    extra += ["--model", str(await assets.ensure_pose_model())]
+                except Exception as e:
+                    self.state, self.error = "error", f"Could not download the posture model: {e}"
+                    await asyncio.sleep(30)
+                    continue
+            py = posture_python()
             test_image = os.environ.get("MEDISENSE_POSTURE_TEST_IMAGE")  # no camera: tests, CI
             if test_image:
-                extra = ["--image", test_image]
+                extra += ["--image", test_image]
             try:
                 self.proc = await asyncio.create_subprocess_exec(
-                    str(py), "-I", str(ENGINE), "--model", str(model), "--fps", str(self.fps), *extra,
+                    str(py), "-I", str(ENGINE), "--fps", str(self.fps), *extra,
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     limit=1 << 20,
                 )
@@ -133,7 +137,16 @@ class PostureService:
             stderr_task.cancel()
             if not self._want:
                 break
-            if fatal:
+            if fatal and self._fatal_kind == "engine":
+                engine_failures += 1
+                if engine_failures >= 2:
+                    # The engine can't run on this Mac: let the page's camera take over.
+                    log.warning("posture engine unusable, using the browser camera: %s", fatal)
+                    self.state, self.source = "browser", "browser"
+                    self.error = f"The background camera engine can't run here ({fatal}). Using this page's camera instead."
+                    return
+                await asyncio.sleep(5)
+            elif fatal:
                 self.state, self.error = "error", fatal
                 await asyncio.sleep(15)  # e.g. camera permission: retry slowly
             else:
@@ -148,6 +161,7 @@ class PostureService:
 
     async def _read(self, stream) -> str | None:
         fatal = None
+        self._fatal_kind = None
         while True:
             line = await stream.readline()
             if not line:
@@ -167,6 +181,7 @@ class PostureService:
                 self.on_preview(msg.get("jpg", ""))
             elif kind == "error":
                 fatal = msg.get("message")
+                self._fatal_kind = msg.get("kind") or "camera"
                 log.warning("posture engine: %s", fatal)
 
     # -- frames (native engine or browser) ----------------------------------

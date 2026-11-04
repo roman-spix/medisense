@@ -530,6 +530,18 @@ $("#end-form").addEventListener("submit", async () => {
 
 let browserCam = null;
 let previewOn = false;
+const POINT_STATUS = {
+  ok: ["✓", "Good"], minor: ["~", "Small adjustment"], major: ["✕", "Out of alignment"],
+  not_visible: ["–", "Not in view"], not_checked: ["–", "Not visible to a camera"],
+  needs_calibration: ["?", "Calibrate to check"], off: ["–", "Not checked"],
+};
+function renderVairocana(points) {
+  $("#v-points").innerHTML = (points || []).map((p, i) => {
+    const [icon, text] = POINT_STATUS[p.status] || POINT_STATUS.not_visible;
+    const tip = p.advice ? `<div class="tip">${esc(p.advice)}</div>` : "";
+    return `<li class="pt pt-${esc(p.status)}"><span class="pt-icon" aria-hidden="true">${icon}</span><div><b>${i + 1}. ${esc(p.name)}</b> <span class="pt-how">${esc(p.how)}</span><div class="pt-status">${esc(text)}</div>${tip}</div></li>`;
+  }).join("");
+}
 const POSTURE_UI = {
   aligned: ["✓", "Aligned"], ok: ["✓", "Good"], drifting: ["!", "Drifting"], away: ["…", "Not in view"],
   waiting: ["…", "Starting the camera…"], calibrating: ["◎", "Calibrating: hold your best posture"],
@@ -553,6 +565,7 @@ function onPosture(p) {
     return;
   }
   if (svc.state === "browser" && !browserCam) startBrowserCam();
+  renderVairocana(p.points);
   $("#posture-val").textContent = p.score == null ? "--" : Math.round(p.score);
   const [icon, label] = POSTURE_UI[p.state] || POSTURE_UI.waiting;
   $("#posture-icon").textContent = icon;
@@ -761,12 +774,13 @@ const LEAN_UI = {
   laxity: "Leaning towards dullness (laxity)",
   balanced: "Restlessness and dullness in balance",
 };
+// betterUp: true / false, or null for numbers that are observed, not aimed at (breathing).
 function trend(cur, before, betterUp, fmt = (v) => num(v, 0)) {
   if (cur == null || before == null) return "";
   const d = cur - before;
   if (Math.abs(d) < 1e-9 || Math.abs(d) / Math.max(1e-9, Math.abs(before)) < 0.05) return '<span class="trend-flat">→ same as before</span>';
-  const good = (d > 0) === betterUp;
-  return `<span class="${good ? "trend-up" : "trend-down"}">${d > 0 ? "▲" : "▼"} ${fmt(Math.abs(d))} vs before</span>`;
+  const cls = betterUp == null ? "trend-flat" : (d > 0) === betterUp ? "trend-up" : "trend-down";
+  return `<span class="${cls}">${d > 0 ? "▲" : "▼"} ${fmt(Math.abs(d))} vs before</span>`;
 }
 async function loadProfile() {
   const p = await api("/api/profile").catch(() => null);
@@ -782,7 +796,7 @@ async function loadProfile() {
       ${tile("Steady", p.steady_pct == null ? "--" : `${num(p.steady_pct, 0)}%`, trend(p.steady_pct, p.steady_pct_before, true, (v) => `${num(v, 0)} pts`) || "of your time sitting")}
       ${tile("Time to settle", mins(p.settle_s), trend(p.settle_s, p.settle_s_before, false, (v) => fmtClock(v)) || "median")}
       ${tile("Longest still", mins(p.longest_still_s), "median per session")}
-      ${tile("Breathing while steady", num(p.steady_breath), trend(p.steady_breath, p.steady_breath_before, false, (v) => num(v, 1)) || "breaths / min")}
+      ${tile("Breathing while steady", num(p.steady_breath), trend(p.steady_breath, p.steady_breath_before, null, (v) => num(v, 1)) || "breaths / min, breathe naturally")}
       ${tile("Restless · drowsy", `${num(p.restless_per10, 1)} · ${p.drowsiness_measured ? num(p.drowsy_per10, 1) : "--"}`, "times per 10 min")}
     </div>` : ""}
     <ul class="profile-advice">${(p.advice || []).map((a) => `<li>${esc(a)}</li>`).join("")}</ul>

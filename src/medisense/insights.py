@@ -291,7 +291,8 @@ FAULT_NAMES = {
     "head_drop": "the head dropping", "chin": "the chin angle", "head_forward": "the head pushing forward",
     "head_level": "the head tilting", "shoulders_level": "uneven shoulders", "shoulders_relaxed": "raised shoulders",
     "lean": "leaning sideways", "slouch": "slouching", "tipped_forward": "tipping forward", "hands": "the hands",
-    "head_over_spine": "the head drifting sideways", "face_forward": "turning the face",
+    "head_over_spine": "the head drifting sideways", "face_forward": "looking around (turning the head)",
+    "leaning_back": "leaning back",
 }
 
 

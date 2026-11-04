@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import platform
 import signal
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
@@ -278,7 +280,23 @@ def cmd_doctor(args) -> int:
     from . import assets
 
     line(None if not assets.ready() else True,
-         "webcam posture model " + ("downloaded" if assets.ready() else "not downloaded yet (happens on first camera use)"))
+         "browser posture model " + ("downloaded" if assets.ready() else "not downloaded yet (happens on first camera use)"))
+    from . import posture_service
+
+    py = posture_service.posture_python()
+    if py is None:
+        line(None, "posture camera engine not installed (posture uses the browser camera; run install.sh to add it)")
+    else:
+        try:
+            r = subprocess.run([str(py), "-I", str(posture_service.ENGINE), "--check"], capture_output=True, text=True, timeout=60)
+            info = json.loads((r.stdout.strip().splitlines() or ["{}"])[-1])
+            line(info.get("type") == "ok", f"posture camera engine: MediaPipe {info.get('mediapipe', '?')}, OpenCV {info.get('opencv', '?')}"
+                 if info.get("type") == "ok" else f"posture camera engine: {info.get('message') or r.stderr.strip()[-200:]}")
+        except Exception as e:
+            line(False, f"posture camera engine: {e}")
+    full = assets.asset_dir() / assets.FULL_MODEL_NAME
+    line(None if not full.exists() else True,
+         "background posture model " + ("downloaded" if full.exists() else "not downloaded yet (happens on first camera use)"))
     print("\nAll good." if ok else "\nSome checks failed; see above.")
     return 0 if ok else 1
 
@@ -337,13 +355,20 @@ def cmd_reprocess(args) -> int:
 def cmd_fetch_assets(args) -> int:
     from . import assets
 
+    code = 0
     try:
-        assets.fetch_sync()
-        print(f"Webcam posture model ready in {assets.asset_dir()}")
-        return 0
+        assets.fetch_full_model_sync()
+        print(f"Posture model for the background camera engine ready in {assets.asset_dir()}")
     except Exception as e:
         print(f"Could not download the posture model now ({e}). It will be retried when you turn the camera on.")
-        return 1
+        code = 1
+    try:
+        assets.fetch_sync()
+        print("Posture model for the browser camera ready")
+    except Exception as e:
+        print(f"Could not download the browser posture model now ({e}). It will be retried when needed.")
+        code = 1
+    return code
 
 
 def main(argv=None) -> None:

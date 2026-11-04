@@ -37,7 +37,8 @@ def emit(obj) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True)
+    ap.add_argument("--model")
+    ap.add_argument("--check", action="store_true", help="only check that the libraries load (installer, doctor)")
     ap.add_argument("--camera", type=int, default=0)
     ap.add_argument("--fps", type=float, default=4.0)
     ap.add_argument("--image", help="analyse this image instead of the camera (testing)")
@@ -54,6 +55,12 @@ def main() -> int:
         from mediapipe.tasks.python import BaseOptions, vision
     except Exception as e:  # pragma: no cover - depends on the install
         emit({"type": "error", "message": f"Posture engine could not start: {e}"})
+        return 2
+    if args.check:
+        emit({"type": "ok", "mediapipe": mp.__version__, "opencv": cv2.__version__})
+        return 0
+    if not args.model:
+        emit({"type": "error", "message": "no pose model given"})
         return 2
 
     try:

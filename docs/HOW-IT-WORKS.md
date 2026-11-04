@@ -93,9 +93,10 @@ estimated before your last movement.
 
 Simulation (six breathing rates 3–20 /min × six rooms, a shift at 90 s; see
 `tests/test_core.py` for the fixed cases): with the v2 firmware, a reading
-98 % of the time when one is due, median error 0.2 %, no reading off by more
+99 % of the time when one is due, median error 0.2 %, no reading off by more
 than 15 %. With the original firmware (1 s stalls, frames for other devices)
-65 % coverage and no wrong readings.
+a reading 66 % of the time, median error 0.4 %, and 2 seconds out of about
+2,000 off by more than 15 % (260 before phase was dropped).
 
 **Heart rate.** Estimated the same way in 45–150 bpm and logged as
 `heart_rate_experimental`, never shown as a trusted number: one board's WiFi

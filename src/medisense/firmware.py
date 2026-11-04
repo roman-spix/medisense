@@ -73,8 +73,11 @@ def load_image(variant: str) -> FirmwareImage:
         files.append((int(off, 16), d / Path(rel).name))
     files.sort()
     version = info.get("firmware_version", "?")
-    if any(str(p).startswith("0002-medisense") for p in info.get("patches", [])):
-        version += " + MediSense 2"  # the CSI / sensor patch (frame selection, radar, pulse sensor)
+    ms = info.get("medisense_firmware")
+    if ms is None and any(str(p).startswith("0002-medisense") for p in info.get("patches", [])):
+        ms = "2"  # images built before BUILDINFO recorded it
+    if ms:
+        version += f" + MediSense {ms}"  # the CSI / sensor patch (frame selection, radar, pulse sensor)
     return FirmwareImage(variant, d, info["flash_size"], version, files)
 
 

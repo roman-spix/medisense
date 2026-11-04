@@ -1,9 +1,14 @@
-import { LineChart, WaveChart, BarChart, sparkline, fmtClock } from "/static/charts.js";
-import { BrowserPoseCamera, drawSkeleton } from "/static/posture.js";
+import { LineChart, WaveChart, BarChart, sparkline, fmtClock } from "./charts.js";
+import { BrowserPoseCamera, drawSkeleton } from "./posture.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// " + MediSense 3": what the board itself reports at start-up, else what MediSense installed on it.
+const msFirmware = (d) => {
+  const v = d.board_medisense || ((d.firmware_label || "").match(/MediSense (\d+)/) || [])[1];
+  return v ? ` + MediSense ${v}` : "";
+};
 const num = (v, d = 1) => (v == null || !isFinite(v) ? "--" : Number(v).toFixed(d));
 
 const store = {
@@ -712,6 +717,21 @@ $("#btn-wifi").addEventListener("click", () => {
 });
 $("#btn-reset").addEventListener("click", () => api("/api/device/reset", "POST", {}).catch((e) => alert(e.message)));
 
+// What the board picks up, from its own 10-second report (MediSense firmware 3).
+function boardHears(d) {
+  const h = d.board_hears;
+  if (!h) return d.board_wifi === "connected" && d.csi_callbacks ? `measuring (${d.csi_callbacks}+ frames so far)` : "--";
+  if (h.heard === 0) return "nothing yet";
+  if (h.heard_per_s == null) return `${h.heard} frames so far, ${h.used} measured`;
+  return `${Math.round(h.heard_per_s)} frames/s, ${Math.round(h.used_per_s)} measured and sent`;
+}
+function boardSendsTo(d, st) {
+  if (!d.board_target) return "--";
+  const ip = d.board_target.split(":")[0];
+  if (!st.mac_ip || st.demo) return d.board_target;
+  return ip === st.mac_ip ? `${d.board_target} (this Mac)` : `${d.board_target} (not this Mac: ${st.mac_ip})`;
+}
+
 function renderBoard(st) {
   const d = st.device || {};
   const cfg = d.configured || {};
@@ -721,11 +741,14 @@ function renderBoard(st) {
     ["USB port", d.port ? `${d.port} (${d.port_label})` : "not connected"],
     ["Chip", d.chip ? `${d.chip}${d.flash_size ? ", " + d.flash_size + " flash" : ""}` : "--"],
     ["MAC address", d.mac || "--"],
-    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}${d.firmware_label && d.firmware_label.includes("MediSense") ? " + MediSense 2" : ""}` : "--"],
+    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}${msFirmware(d)}` : "--"],
+    ["Board hears", boardHears(d)],
+    ["Board sends to", boardSendsTo(d, st)],
     ["Board address", d.board_ip || "--"],
     ["This Mac", st.mac_ip || "--"],
     ["WiFi network", cfg.ssid || "--"],
-    ["Router filter", cfg.filter_mac || (cfg.ssid ? "off (listening to all traffic)" : "--")],
+    ["Router filter", d.board_hears && d.board_hears.any_sender ? "off (nothing came from the router's address, so every sender is used)"
+      : cfg.filter_mac || (cfg.ssid ? "automatic (the router the board is connected to)" : "--")],
     ["App version", st.version],
   ];
   $("#board-facts").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");

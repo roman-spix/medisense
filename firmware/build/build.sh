@@ -106,6 +106,7 @@ python -m esptool --chip esp32s3 image_info --version 2 build/esp32-csi-node.bin
 APP_SIZE="$(stat -c%s build/esp32-csi-node.bin)"
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 PATCH_JSON="$(printf '"%s",' "${PATCHES[@]}")"
+MEDISENSE_FW="$(tr -d '[:space:]' < "$HERE/MEDISENSE_FIRMWARE")"
 cat > "$OUT/BUILDINFO.json" <<EOF
 {
   "variant": "$VARIANT",
@@ -117,6 +118,7 @@ cat > "$OUT/BUILDINFO.json" <<EOF
   "esp_idf": "$IDF_VERSION",
   "sdkconfig_defaults": "$DEFAULTS",
   "patches": [${PATCH_JSON%,}],
+  "medisense_firmware": "$MEDISENSE_FW",
   "app_size_bytes": $APP_SIZE,
   "built_at": "$BUILT_AT"
 }

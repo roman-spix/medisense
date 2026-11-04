@@ -586,7 +586,9 @@ class PostureTracker:
             self._good_since = None
             if self._bad_since is None:
                 self._bad_since = t
-            elif t - self._bad_since >= s.hold_s and t - self._last_alert >= s.cooldown_s:
+            elif t - self._bad_since >= s.hold_s and t - self._last_alert >= s.cooldown_s and self.calibrated:
+                # (no reminders before your own posture is calibrated: the level
+                # checks alone would nag about a camera or a body that is simply tilted)
                 self._last_alert = t
                 self.alerts += 1
                 tips = [c.advice for c in a.worst[:2] if c.advice]

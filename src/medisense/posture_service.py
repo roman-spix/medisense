@@ -37,7 +37,11 @@ def posture_python() -> Path | None:
 
 
 def native_available() -> bool:
-    if os.environ.get("MEDISENSE_POSTURE_NATIVE") == "0":  # tests; or to force the browser camera
+    """The background engine is opt-in (MEDISENSE_POSTURE_NATIVE=1 and an
+    installed .venv-posture). By default the page's own camera runs MediaPipe
+    in the browser: on an older MacBook the background engine (Apple Vision)
+    was too heavy, and the browser version runs smoothly."""
+    if os.environ.get("MEDISENSE_POSTURE_NATIVE") != "1":
         return False
     return posture_python() is not None
 

@@ -1,8 +1,9 @@
-// Browser camera fallback for posture: MediaPipe Pose in this tab.
-// Used only when the background camera engine isn't installed. The page must
-// stay visible (browsers pause hidden tabs). Video never leaves the page;
-// only the 33 landmark positions are sent to the local app, which scores
-// them against the Vairocana posture (the same scoring as the background engine).
+// The camera for posture: MediaPipe Pose (lite) running in this page, on the
+// graphics chip when it can. Video never leaves the page; only the 33
+// landmark positions go to the local app, which does the scoring (Vairocana
+// in MediSense, office posture in MediSense Posture). The page must stay open;
+// in the background the browser slows it to about one check a second, which
+// is plenty for posture.
 
 const BASE = "/vendor/mediapipe";
 const FPS = 6;
@@ -34,10 +35,11 @@ export function drawSkeleton(canvas, lm, { video = null, colorVar = "--posture",
 }
 
 export class BrowserPoseCamera {
-  constructor({ canvas, onLandmarks, onStatus }) {
+  constructor({ canvas, onLandmarks, onStatus, fps = FPS }) {
     this.canvas = canvas;
     this.onLandmarks = onLandmarks;
     this.onStatus = onStatus;
+    this.fps = fps;
     this.showVideo = false;
     this.running = false;
   }
@@ -60,7 +62,7 @@ export class BrowserPoseCamera {
       this.video.playsInline = true; this.video.muted = true;
       this.video.srcObject = this.stream;
       await this.video.play();
-      this.onStatus("tracking", "Tracking (browser camera: keep this page visible).");
+      this.onStatus("tracking", "Watching your posture with this page's camera. Keep this page open.");
       this._loop();
     } catch (e) {
       this.running = false;
@@ -96,6 +98,6 @@ export class BrowserPoseCamera {
         this.onLandmarks(lm, world, this.video.videoWidth / Math.max(1, this.video.videoHeight));
       }
     } catch (e) { /* skip a bad frame */ }
-    this._timer = setTimeout(() => this._loop(), Math.max(10, 1000 / FPS - (performance.now() - t0)));
+    this._timer = setTimeout(() => this._loop(), Math.max(10, 1000 / this.fps - (performance.now() - t0)));
   }
 }

@@ -63,7 +63,6 @@ administrator password and installs nothing system-wide:
 
 - it moves MediSense to `~/Applications/MediSense`
 - it installs its own private Python, leaving the Mac's old one alone
-- it installs the posture camera engine (Apple's own body-pose recognition, built into macOS 11 and later)
 - it puts four icons on your Desktop: **MediSense**, **MediSense Demo**,
   **MediSense Posture** and **MediSense Pro**
 
@@ -174,16 +173,26 @@ healthy working posture:
 - **Head over the shoulders**: not pushed towards the screen, not hanging down
 - **Sitting centred**: not leaning to one side, head level
 
-Double-click **MediSense Posture**. Sit well at your desk once and click
-**Calibrate my posture**; it then measures drift from that. It runs with the
-camera in the background (the page can be closed; keep the Terminal window
-open or minimised) and sends a macOS notification when your posture stays
-below your threshold (default: below 80 for 20 seconds, at most every 3
-minutes; all adjustable), and draws your day as a chart. The first time,
-macOS asks to allow the camera for Terminal and notifications for Script
-Editor (System Preferences → Notifications). To have it start at login, add
-**MediSense Posture.command** in System Preferences → Users & Groups → Login
-Items. Recalibrate after moving the laptop or the chair.
+Double-click **MediSense Posture**. Its page opens in your browser and
+watches with the camera right there (the browser asks once for the camera).
+Sit well at your desk once and click **Calibrate my posture**; it then
+measures drift from that. **Keep that page open** (in its own window if you
+like, behind your work; just don't close it) and keep the Terminal window
+open or minimised: in the background the browser checks about once a second,
+which is plenty for posture. Chrome works best for this. It sends a macOS
+notification when your posture stays below your threshold (default: below 80
+for 20 seconds, at most every 3 minutes; all adjustable). The first time,
+allow notifications for Script Editor (System Preferences → Notifications).
+Recalibrate after moving the laptop or the chair.
+
+The **Today** card counts your day as you work, updated every 10 seconds:
+time tracked, how much of it you were upright (at or above your reminder
+level), your longest upright stretch, the average score, the reminders sent,
+what pulled you out of line most (slumping, head forward, raised shoulders…)
+and the score through the day; earlier days are in its menu. **Stop
+tracking** switches the camera off and records nothing until you click
+**Start tracking** (opening the app starts tracking). **Pause reminders**
+keeps counting but sends no notifications.
 
 ![MediSense Posture](docs/img/posture.png)
 
@@ -224,10 +233,11 @@ Deleting a session in the app moves it to `~/MediSense/trash`.
 | "The board didn't answer" while setting up | Hold **BOOT** on the board, press and release **RESET**, release **BOOT**, then unplug and replug. |
 | "The WiFi password seems to be wrong" | Type it again in the form shown. Passwords are case-sensitive. |
 | "Can't find that WiFi network" | The board needs 2.4 GHz. If your router names 2.4 and 5 GHz differently, pick the 2.4 GHz name. |
-| "On WiFi but no data reaches this Mac" | Same WiFi on the Mac? macOS firewall: System Preferences → Security & Privacy → Firewall. Allow Python, or turn off "Block all incoming connections". |
+| "On WiFi but no data reaches this Mac" | Look at the **Board** tab. *Board hears* nothing: click **Restart board**, or unplug and replug it (MediSense also updates its firmware then; firmware MediSense 2 had exactly this fault). *Board sends to* not this Mac: MediSense corrects it by itself within a minute. Board sends to this Mac but nothing arrives: the macOS firewall (System Preferences → Security & Privacy → Firewall → Firewall Options…: allow "python3.12", untick "Block all incoming connections"), a VPN on the Mac, or the router's "AP / client isolation". |
 | Signal "Weak" | Move the board closer to the router, away from metal and other electronics. |
 | Breathing shows "--" for long | Sit still. Move the board so your chest is between it and the router. |
-| Camera posture doesn't start | System Preferences → Security & Privacy → Camera: allow **Terminal** (background engine), then quit and restart MediSense. If the engine can't run, posture switches to the browser's camera by itself: allow it when the browser asks, and keep that page visible. |
+| Camera posture doesn't start | Allow the camera when the browser asks. Safari: Safari → Settings for This Website → Camera. Chrome: also System Preferences → Security & Privacy → Camera → Google Chrome. |
+| A page stays at "Starting…" | Reload it with ⌘R. (Version 0.2.0 could load old cached page code after an update; 0.2.1 and later can't.) |
 | No posture notifications | System Preferences → Notifications → **Script Editor** → Allow Notifications. Test it with **Send a test notification** in MediSense Posture. |
 | Data keeps pausing | Plug the board into the Mac during a session: the Board tab's **Interruptions** list then says why (WiFi drop with a reason code, power dip, restart). |
 | macOS asks if "python3.12" may accept incoming connections | Click **Allow**: that's the board's data arriving. |
@@ -237,12 +247,16 @@ Run a self-check any time in Terminal: `~/Applications/MediSense/.venv/bin/medis
 ## 8. Updating and removing
 
 **Update:** download the new ZIP and run the installer from it again, the same
-way as installing; it says "Updating MediSense 0.1.0 → 0.2.0". Your
+way as installing; it says which version it updates from and to. Your
 recordings and board setup are kept, and the board's firmware is updated the
 next time you plug it in. Step by step: [docs/FIRST-TEST.md](docs/FIRST-TEST.md).
 
-**Remove:** delete `~/Applications/MediSense`, `~/.medisense` and the four
-Desktop icons. Your recordings stay in `~/MediSense` until you delete that too.
+**Start clean:** double-click **Uninstall MediSense.command** in the downloaded
+folder (or run `bash uninstall.sh` there). It removes the program, its
+private Python and the Desktop icons; your recordings in `~/MediSense` are
+kept unless you type `yes`. Then install again.
+
+**Remove:** double-click **Uninstall MediSense.command** (see above).
 
 ## 9. How it works, and its limits
 
@@ -272,13 +286,16 @@ step), `firmware/` (prebuilt RuView firmware, the MediSense patches and how it
 was built), `tests/`. The posture camera engine runs in its own environment
 (`.venv-posture`, `requirements-posture-macos.txt`): Apple Vision through PyObjC
 on a Mac (every compiled file checked to run on macOS 11), MediaPipe on Linux.
+It is off by default (`MEDISENSE_INSTALL_POSTURE_ENGINE=1 bash install.sh`, then
+run with `MEDISENSE_POSTURE_NATIVE=1`): on a 2014 MacBook it was too heavy, so
+posture runs in the browser page.
 
 ## Credits and licences
 
 - [RuView](https://github.com/ruvnet/RuView) (MIT): the ESP32 CSI firmware.
 - [MediaPipe](https://github.com/google-ai-edge/mediapipe) (Apache-2.0): camera
-  pose in the browser fallback and on Linux. On a Mac, Apple's Vision framework
-  through [PyObjC](https://github.com/ronaldoussoren/pyobjc) (MIT) and
+  pose, in the browser page. The optional background engine uses Apple's Vision
+  framework through [PyObjC](https://github.com/ronaldoussoren/pyobjc) (MIT) and
   [OpenCV](https://opencv.org) (Apache-2.0).
 - The meditation posture follows Lama Yonten Gyaltso, *Nectar of Liberation*
   (Нектар освобождения), Buddhist centre "Kalachakra", 2018.

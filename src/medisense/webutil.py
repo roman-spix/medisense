@@ -3,8 +3,34 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from aiohttp import web
+
+from . import __version__
+
+# The page code is served under a path that changes with every version, so a
+# browser can never mix a cached old script with a new page after an update
+# (that left the pages stuck at "Starting…"). /static stays for old links.
+ASSET_PREFIX = f"/v/{__version__}"
+
+
+def page(path: Path) -> web.Response:
+    """An HTML page whose script and style links point at this version's files."""
+    html = path.read_text(encoding="utf-8").replace('"/static/', f'"{ASSET_PREFIX}/')
+    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+async def no_store_assets(request: web.Request, response: web.StreamResponse) -> None:
+    """on_response_prepare: always revalidate page code (cheap on localhost)."""
+    if request.path.startswith(("/v/", "/static/")):
+        response.headers["Cache-Control"] = "no-cache"
+
+
+def add_assets(app: web.Application, web_dir: Path) -> None:
+    app.router.add_static(ASSET_PREFIX, web_dir)
+    app.router.add_static("/static", web_dir)
+    app.on_response_prepare.append(no_store_assets)
 
 
 def _jsonable(o):

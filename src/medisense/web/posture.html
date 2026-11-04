@@ -24,17 +24,17 @@
       <header class="card-h"><h2 id="h-now">Now</h2></header>
       <div class="hero"><span id="score" class="hero-num">--</span><span class="unit">/ 100</span></div>
       <div class="state-line"><span id="state-icon" class="state-icon" aria-hidden="true">…</span><span id="state" class="state-text small">Waiting for the camera</span></div>
-      <ul id="advice" class="advice"></ul>
+      <ul id="advice" class="advice fixed" aria-live="polite"></ul>
       <div class="row gap-s wrap">
         <button id="calibrate" class="primary">Calibrate my posture</button>
-        <button id="pause" class="ghost">Pause reminders</button>
+        <button id="pause" class="ghost pause-btn">Pause reminders</button>
       </div>
-      <p class="caption" id="calib-note">Sit well at your desk (tall, shoulders relaxed, head over your shoulders, hands on the keyboard), then click Calibrate. MediSense Posture remembers it and measures drift from it.</p>
+      <p class="caption fixed3" id="calib-note">Sit well (tall, shoulders relaxed, head over your shoulders, hands on the keyboard), then click Calibrate.</p>
     </article>
 
     <article class="card" aria-labelledby="h-points">
       <header class="card-h"><h2 id="h-points">What it watches</h2></header>
-      <ul id="points" class="points"></ul>
+      <ul id="points" class="points steady"></ul>
       <p class="caption">Your hands and legs are free: type, use the mouse, cross your legs. Only the back, shoulders and head count.</p>
     </article>
 
@@ -42,20 +42,31 @@
       <header class="card-h"><h2 id="h-cam">Camera</h2><button id="preview" class="ghost small">Show camera</button></header>
       <canvas id="pose" class="pose tall" aria-label="Posture skeleton"></canvas>
       <img id="preview-img" class="pose tall" alt="Camera preview" hidden>
-      <p class="caption" id="cam-note">Starting the camera…</p>
-      <button id="browser-cam" class="ghost small" hidden>Use this page's camera instead</button>
+      <p class="caption fixed3" id="cam-note">Starting the camera…</p>
+      <button id="browser-cam" class="ghost small invisible">Start the camera again</button>
     </article>
 
     <article class="card span2" aria-labelledby="h-today">
-      <header class="card-h"><h2 id="h-today">Today</h2><select id="day" aria-label="Day"></select></header>
-      <div class="tiles">
-        <div class="tile"><div class="l">Tracked</div><div class="v" id="t-min">--</div><div class="s">minutes</div></div>
-        <div class="tile"><div class="l">Aligned</div><div class="v" id="t-aligned">--</div><div class="s">score 80 or more</div></div>
+      <header class="card-h"><h2 id="h-today">Today</h2>
+        <div class="row gap-s"><select id="day" aria-label="Day"></select><button id="tracking" class="ghost small">Stop tracking</button></div></header>
+      <p class="caption fixed1" id="track-note">Tracking. The numbers update every 10 seconds.</p>
+      <div class="tiles today-tiles">
+        <div class="tile"><div class="l">Tracked</div><div class="v" id="t-min">--</div><div class="s" id="t-span">in view of the camera</div></div>
+        <div class="tile"><div class="l">Upright</div><div class="v" id="t-aligned">--</div><div class="s" id="t-aligned-s">of the time at 80 or more</div></div>
+        <div class="tile"><div class="l">Longest upright</div><div class="v" id="t-longest">--</div><div class="s">in one stretch</div></div>
         <div class="tile"><div class="l">Average</div><div class="v" id="t-avg">--</div><div class="s">posture score</div></div>
-        <div class="tile"><div class="l">Reminders</div><div class="v" id="t-alerts">--</div><div class="s" id="t-fault">&nbsp;</div></div>
+        <div class="tile"><div class="l">Reminders</div><div class="v" id="t-alerts">--</div><div class="s">sent</div></div>
       </div>
-      <h3><span class="key" style="background:var(--posture)"></span>Posture score through the day</h3>
-      <canvas id="day-chart" class="chart-md"></canvas>
+      <div class="today-cols">
+        <div>
+          <h3><span class="key" style="background:var(--posture)"></span>Posture score through the day</h3>
+          <canvas id="day-chart" class="chart-md"></canvas>
+        </div>
+        <div>
+          <h3>What pulled you out of line</h3>
+          <ul id="issues" class="issues"></ul>
+        </div>
+      </div>
     </article>
 
     <article class="card" aria-labelledby="h-rem">

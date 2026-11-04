@@ -260,7 +260,7 @@ def cmd_doctor(args) -> int:
         line(True, "can build board settings")
     except Exception as e:
         line(False, f"cannot build board settings: {e}")
-    ip = network.local_ip()
+    ip = network.lan_ip()
     line(bool(ip), f"this computer's network address: {ip or 'none (not connected?)'}")
     ssid = network.current_ssid()
     line(None if not ssid else True, f"WiFi network: {ssid or 'unknown'}")
@@ -289,8 +289,8 @@ def cmd_doctor(args) -> int:
     from . import posture_service
 
     py = posture_service.posture_python()
-    if py is None:
-        line(None, "posture camera engine not installed (posture uses the browser camera; run install.sh to add it)")
+    if not posture_service.native_available():
+        line(True, "posture camera: in the browser page (MediaPipe), the page must stay open")
     else:
         try:
             r = subprocess.run([str(py), "-I", str(posture_service.ENGINE), "--check"], capture_output=True, text=True, timeout=60)
@@ -299,7 +299,7 @@ def cmd_doctor(args) -> int:
                  if info.get("type") == "ok" else f"posture camera engine: {info.get('message') or r.stderr.strip()[-200:]}")
         except Exception as e:
             line(False, f"posture camera engine: {e}")
-    if sys.platform != "darwin":
+    if sys.platform != "darwin" and posture_service.native_available():
         full = assets.asset_dir() / assets.FULL_MODEL_NAME
         line(None if not full.exists() else True,
              "background posture model " + ("downloaded" if full.exists() else "not downloaded yet (happens on first camera use)"))
@@ -362,7 +362,9 @@ def cmd_fetch_assets(args) -> int:
     from . import assets
 
     code = 0
-    if sys.platform != "darwin":  # on a Mac the engine uses Apple Vision: no model to download
+    from . import posture_service
+
+    if sys.platform != "darwin" and posture_service.native_available():  # only the optional Linux engine needs it
         try:
             assets.fetch_full_model_sync()
             print(f"Posture model for the background camera engine ready in {assets.asset_dir()}")

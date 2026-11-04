@@ -8,6 +8,7 @@
   "esp_idf": "ESP-IDF v5.4",
   "sdkconfig_defaults": "sdkconfig.defaults;sdkconfig.defaults.4mb;sdkconfig.defaults.medisense",
   "patches": ["0001-led-strip-idf54.patch","0002-medisense-csi-sensors.patch"],
-  "app_size_bytes": 920448,
-  "built_at": "2026-11-04T12:20:51Z"
+  "medisense_firmware": "3",
+  "app_size_bytes": 921120,
+  "built_at": "2026-11-04T20:08:59Z"
 }

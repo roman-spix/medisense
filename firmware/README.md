@@ -51,9 +51,10 @@ Changes from RuView's own release images, and why:
      Older readers ignore all three.
    - *No 1-second holes.* RuView's gateway pinger waited 1 s for each lost
      reply; the timeout is now twice the ping interval.
-   - *Less radio load.* RuView switched on capture of every device's data
-     frames; MediSense doesn't need them (the CSI comes from frames to the
-     board) and keeps management frames only.
+   - *(MediSense 2 also kept capture to management frames only, to save
+     radio load. That was a mistake: as RuView#521/#893 describe, on a board
+     without a display it starves the CSI engine, and the board joined the
+     WiFi but sent nothing. MediSense 3 keeps RuView's setting again.)*
    - *Never gives up on WiFi.* RuView stopped reconnecting after 10 failures
      in a row; now it retries every 3 s for as long as it takes, refreshes
      the router address on reconnection and restarts the pinger.
@@ -66,7 +67,19 @@ Changes from RuView's own release images, and why:
      100 Hz in small batches (magic `0xC511D0B1`). Without a sensor nothing
      runs.
 
-   Boards set up with the earlier image are updated automatically the next
+7. **MediSense 3** (same patch file, after the first test of MediSense 2):
+   - *Data frames are captured again* (see above), so the board always has
+     frames to measure.
+   - *Never silent because of the sender filter.* If frames keep arriving but
+     none from the router for 5 s (a wrong router address, mesh units), the
+     board uses frames from every sender until it reconnects.
+   - *It says what it hears.* Every 10 s the board logs how many frames it
+     heard, used, and why it set others aside (`medisense stats: ...`), and at
+     start-up `MediSense firmware 3`. The app shows this on the Board tab, so
+     "the board hears nothing" and "the board sends but nothing arrives" look
+     different.
+
+   Boards set up with an earlier image are updated automatically the next
    time they're plugged in (when the WiFi password is in the Keychain;
    otherwise the app asks for it once).
 
@@ -76,7 +89,7 @@ Each folder holds only what the app flashes: the four images,
 the ESP-IDF component versions used, so rebuilds are repeatable.
 
 The build log, resulting `sdkconfig` and `image_info` for the current images
-are on the `firmware-build` branch (run 41828027282); those of the first
+are on the `firmware-build` branch (run 41903308358); those of the first
 images are in commit `bfb3173`. ESP-IDF builds aren't byte-identical, so a
 later rebuild produces different (equivalent) files.
 

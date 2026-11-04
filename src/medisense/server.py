@@ -18,7 +18,7 @@ from aiohttp import WSMsgType, web
 
 from . import assets, insights, sessions
 from .app import MediSenseApp
-from .webutil import dumps, guard, json_body as _json
+from .webutil import add_assets, dumps, guard, json_body as _json, page
 from .config import WEB_DIR, load_wifi_password
 
 log = logging.getLogger("medisense.server")
@@ -31,9 +31,7 @@ def _app(request: web.Request) -> MediSenseApp:
 
 
 async def index(request: web.Request) -> web.StreamResponse:
-    resp = web.FileResponse(WEB_DIR / "index.html")
-    resp.headers["Cache-Control"] = "no-cache"
-    return resp
+    return page(WEB_DIR / "index.html")
 
 
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
@@ -245,6 +243,6 @@ def build(app: MediSenseApp) -> web.Application:
         web.post("/api/sessions/{sid}/open", api_session_open),
         web.delete("/api/sessions/{sid}", api_session_delete),
         web.get("/vendor/mediapipe/{name:.+}", vendor),
-        web.static("/static", WEB_DIR),
     ])
+    add_assets(w, WEB_DIR)
     return w

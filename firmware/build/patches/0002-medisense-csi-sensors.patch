@@ -12,10 +12,10 @@ index 0cabf5d..95ea8d2 100644
      # ADR-081 — adaptive CSI mesh firmware kernel
      "rv_radio_ops_esp32.c"
 diff --git a/firmware/esp32-csi-node/main/csi_collector.c b/firmware/esp32-csi-node/main/csi_collector.c
-index 6a15443..a8409fd 100644
+index 6a15443..46aec3e 100644
 --- a/firmware/esp32-csi-node/main/csi_collector.c
 +++ b/firmware/esp32-csi-node/main/csi_collector.c
-@@ -45,6 +45,34 @@ static bool s_node_id_early_set = false;
+@@ -45,6 +45,48 @@ static bool s_node_id_early_set = false;
  static uint8_t s_filter_mac[6] = {0};
  static bool    s_filter_mac_set = false;
  
@@ -47,24 +47,51 @@ index 6a15443..a8409fd 100644
 +static uint32_t s_ms_foreign = 0;
 +static bool     s_collector_ready = false;
 +
++/* MediSense 3: never go silent because of the sender filter. If frames keep
++ * arriving but none from the expected sender for MS_SENDER_GIVEUP_US (a wrong
++ * router address, mesh units, ...), frames from every sender are used. And
++ * every MS_STATS_PERIOD_US the board logs what it hears, so the app can tell
++ * "the board hears nothing" from "the board sends but nothing arrives". */
++#define MS_SENDER_GIVEUP_US    (5 * 1000 * 1000)
++#define MS_STATS_PERIOD_US     (10 * 1000 * 1000)
++static bool     s_ms_any_sender = false;
++static int64_t  s_ms_last_accepted_us = 0;
++static uint32_t s_ms_foreign_streak = 0;
++static uint32_t s_ms_heard = 0;
++static esp_timer_handle_t s_ms_stats_timer = NULL;
++static void ms_stats_cb(void *arg);
++
  /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
   * Without this, the firmware compiles but crashes at runtime with:
   *   "E (xxxx) wifi:CSI not enabled in menuconfig!"
-@@ -276,25 +304,42 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
+@@ -276,25 +318,50 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
  {
      (void)ctx;
  
 +    int64_t now_us = esp_timer_get_time();
++    s_ms_heard++;
 +
 +    /* MediSense: source filter first (cheap compares), so the rate gate's
 +     * slots go to frames that are actually used. ADR-060's configured filter
 +     * wins; otherwise the AP this board is connected to. Uses defensive
 +     * copies, never g_nvs_config (see #232/#375). */
-+    const uint8_t *src = s_filter_mac_set ? s_filter_mac : (s_ap_bssid_set ? s_ap_bssid : NULL);
++    const uint8_t *src = NULL;
++    if (!s_ms_any_sender) {
++        src = s_filter_mac_set ? s_filter_mac : (s_ap_bssid_set ? s_ap_bssid : NULL);
++    }
 +    if (src != NULL && memcmp(info->mac, src, 6) != 0) {
 +        s_ms_foreign++;
++        s_ms_foreign_streak++;
++        if (s_ms_foreign_streak >= 50 && (now_us - s_ms_last_accepted_us) > MS_SENDER_GIVEUP_US) {
++            s_ms_any_sender = true;
++            ESP_LOGW(TAG, "medisense: no frames from %02x:%02x:%02x:%02x:%02x:%02x for %d s; "
++                     "using frames from every sender",
++                     src[0], src[1], src[2], src[3], src[4], src[5], MS_SENDER_GIVEUP_US / 1000000);
++        }
 +        return;
 +    }
++    s_ms_last_accepted_us = now_us;
++    s_ms_foreign_streak = 0;
 +    bool to_me = s_own_mac_set && memcmp(info->dmac, s_own_mac, 6) == 0;
 +    if (to_me) {
 +        s_last_to_me_us = now_us;
@@ -95,15 +122,10 @@ index 6a15443..a8409fd 100644
 +    if (to_me) {
 +        s_ms_to_me++;
 +    }
-+    if ((s_cb_count % 1000) == 0) {
-+        ESP_LOGI(TAG, "medisense frames: to_board=%lu other=%lu foreign=%lu rate_drop=%lu",
-+                 (unsigned long)s_ms_to_me, (unsigned long)s_ms_other,
-+                 (unsigned long)s_ms_foreign, (unsigned long)s_early_drop);
-+    }
  
      if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
          ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d",
-@@ -303,9 +348,20 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
+@@ -303,9 +370,20 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      }
  
      uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
@@ -125,7 +147,7 @@ index 6a15443..a8409fd 100644
          /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
           * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
           * We only need 20-50 Hz for the sensing pipeline. */
-@@ -459,6 +515,11 @@ static void csi_start_self_ping(void)
+@@ -459,6 +537,11 @@ static void csi_start_self_ping(void)
      cfg.target_addr     = target;
      cfg.count           = ESP_PING_COUNT_INFINITE;
      cfg.interval_ms     = CSI_SELF_PING_INTERVAL_MS;
@@ -137,7 +159,7 @@ index 6a15443..a8409fd 100644
      cfg.data_size       = 1;
      cfg.task_stack_size = 4096;
  
-@@ -557,6 +618,12 @@ void csi_collector_init(void)
+@@ -557,6 +640,13 @@ void csi_collector_init(void)
      /* Update the hop table's first channel to match. */
      s_hop_channels[0] = csi_channel;
  
@@ -145,16 +167,36 @@ index 6a15443..a8409fd 100644
 +    if (esp_wifi_get_mac(WIFI_IF_STA, s_own_mac) == ESP_OK) {
 +        s_own_mac_set = true;
 +    }
++    s_ms_last_accepted_us = esp_timer_get_time();
 +    csi_collector_refresh_ap();
 +
      /* Disable WiFi modem sleep — reliable CSI capture needs the radio awake.
       * The ESP-IDF STA default is WIFI_PS_MIN_MODEM, which lets the modem
       * sleep between DTIM beacons; with the MGMT-only promiscuous filter
-@@ -647,6 +714,30 @@ void csi_collector_init(void)
+@@ -647,6 +737,52 @@ void csi_collector_init(void)
       * receives a guaranteed OFDM unicast floor even when promiscuous capture is
       * starved (display builds / quiet networks). Additive to #396/#893. */
      csi_start_self_ping();
 +    s_collector_ready = true;
++
++    /* MediSense: what the board hears, every 10 s on the serial log. */
++    if (s_ms_stats_timer == NULL) {
++        const esp_timer_create_args_t args = { .callback = ms_stats_cb, .name = "ms_stats" };
++        if (esp_timer_create(&args, &s_ms_stats_timer) == ESP_OK) {
++            esp_timer_start_periodic(s_ms_stats_timer, MS_STATS_PERIOD_US);
++        }
++    }
++    ESP_LOGI(TAG, "MediSense firmware 3: frames from the router, MGMT+DATA capture, stats every 10 s");
++}
++
++static void ms_stats_cb(void *arg)
++{
++    (void)arg;
++    ESP_LOGI(TAG, "medisense stats: heard=%lu used=%lu to_board=%lu other=%lu foreign=%lu "
++             "rate_drop=%lu any_sender=%d",
++             (unsigned long)s_ms_heard, (unsigned long)s_cb_count, (unsigned long)s_ms_to_me,
++             (unsigned long)s_ms_other, (unsigned long)s_ms_foreign, (unsigned long)s_early_drop,
++             s_ms_any_sender ? 1 : 0);
 +}
 +
 +void csi_collector_refresh_ap(void)
@@ -176,24 +218,25 @@ index 6a15443..a8409fd 100644
 +    if (!s_collector_ready) {
 +        return;
 +    }
++    s_ms_last_accepted_us = esp_timer_get_time();
++    s_ms_foreign_streak = 0;
++    s_ms_any_sender = false;
 +    csi_collector_refresh_ap();
 +    csi_start_self_ping();
  }
  
  /* Accessor for other modules that need the authoritative runtime node_id. */
-@@ -760,6 +851,15 @@ static void hop_timer_cb(void *arg)
+@@ -760,6 +896,13 @@ static void hop_timer_cb(void *arg)
  
  void csi_collector_enable_data_capture(void)
  {
-+#ifndef MEDISENSE_CAPTURE_ALL_DATA
-+    /* MediSense: the board senses through the frames the router sends to it
-+     * (self-ping replies, the host's pacer packets), which arrive whatever
-+     * the promiscuous filter. Capturing every other device's DATA frames only
-+     * adds hundreds of radio interrupts per second (the load behind RuView
-+     * #396) and frames that are then filtered out. Keep MGMT-only. */
-+    ESP_LOGI(TAG, "medisense: keeping MGMT-only promiscuous capture (CSI from frames to this board)");
-+    return;
-+#endif
++    /* MediSense 3: RuView's upgrade is kept. MediSense 2 skipped it, to save
++     * radio interrupts, expecting the frames sent to the board (gateway pings,
++     * the app's pacer packets) to produce CSI whatever the promiscuous filter.
++     * On a board without a display that left the CSI callback starved, as
++     * RuView#521/#893 describe: the board joined the WiFi and sent nothing.
++     * The sender filter and the 50 Hz gate in wifi_csi_callback keep the
++     * processing load low. */
      /* MGMT-only (RuView#396) starves the CSI callback on display-less boards
       * (RuView#521/#893): beacons alone are sparse, yield collapses to 0 pps.
       * Without a display there is no QSPI/SPI-flash cache contention with the

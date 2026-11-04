@@ -4,6 +4,11 @@ import { BrowserPoseCamera, drawSkeleton } from "./posture.js";
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// " + MediSense 3": what the board itself reports at start-up, else what MediSense installed on it.
+const msFirmware = (d) => {
+  const v = d.board_medisense || ((d.firmware_label || "").match(/MediSense (\d+)/) || [])[1];
+  return v ? ` + MediSense ${v}` : "";
+};
 const num = (v, d = 1) => (v == null || !isFinite(v) ? "--" : Number(v).toFixed(d));
 
 const store = {
@@ -721,7 +726,7 @@ function renderBoard(st) {
     ["USB port", d.port ? `${d.port} (${d.port_label})` : "not connected"],
     ["Chip", d.chip ? `${d.chip}${d.flash_size ? ", " + d.flash_size + " flash" : ""}` : "--"],
     ["MAC address", d.mac || "--"],
-    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}${d.firmware_label && d.firmware_label.includes("MediSense") ? " + MediSense 2" : ""}` : "--"],
+    ["Firmware", d.board_firmware ? `RuView ${d.board_firmware}${msFirmware(d)}` : "--"],
     ["Board address", d.board_ip || "--"],
     ["This Mac", st.mac_ip || "--"],
     ["WiFi network", cfg.ssid || "--"],
